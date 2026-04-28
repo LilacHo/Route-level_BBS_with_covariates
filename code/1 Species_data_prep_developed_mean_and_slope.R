@@ -314,10 +314,15 @@ stanfit <- slope_model$sample(
   iter_sampling=2000,
   iter_warmup=2000,
   max_treedepth = 15,
-  parallel_chains = 4)
+  parallel_chains = 4,
+  save_cmdstan_config = TRUE) # needed for $summary() in cmdstanr >= 0.8.0
 
 summ <- stanfit$summary()
+# or
+# summ <- posterior::summarise_draws(stanfit$draws())
 
+# diagnostics
+diag <- stanfit$diagnostic_summary()
 
 output_dir <- "output"
 if(!dir.exists(output_dir)) dir.create(output_dir)
