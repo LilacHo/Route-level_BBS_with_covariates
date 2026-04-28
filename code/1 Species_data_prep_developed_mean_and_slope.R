@@ -84,6 +84,38 @@ new_data <- data.frame(strat_name = raw_data$strata_name,
                        r_year = raw_data$year) %>% 
   filter(route %in% realized_routes$route)
 
+## Load covariates ####
+# Load BEFORE the spatial/neighbourhood setup so that routes with no covariate
+# data are dropped before routeF indices and the adjacency graph are built.
+# Otherwise stan_data[["nroutes"]], the adjacency, and the habitat vectors
+# end up with mismatched dimensions.
+developed <- read.csv(here::here("data", "developed_1km", "developed.csv"))
+developed <- developed %>%
+  mutate(rt.uni = paste(StateNum, Route, sep = "-"))
+
+# record routes missing covariate information, then drop them
+missing_developed <- developed %>%
+  filter(is.na(developed))
+# if(nrow(missing_developed) > 0){
+#   if(!dir.exists(here::here("data","missing_covariates"))) dir.create(here::here("data","missing_covariates"), recursive = TRUE)
+#   write.csv(missing_developed,
+#             here::here("data","missing_covariates",
+#                        paste0("routes_missing_developed_",firstYear,"_",lastYear,".csv")),
+#             row.names = FALSE)
+# }
+
+developed_full <- developed %>%
+  filter(!is.na(developed)) %>%
+  rename(route = rt.uni) %>%
+  select(route, year, developed) %>%
+  filter(year %in% year_range)
+
+# drop count data (and routes) with no covariate information
+new_data <- new_data %>%
+  inner_join(developed_full,
+             by = c("route",
+                    "r_year" = "year"))
+
 strata_list <- data.frame(strata_name = unique(new_data$strat_name),
                           strat = unique(new_data$strat))
 
@@ -137,7 +169,16 @@ car_stan_dat <- neighbours_define_voronoi(real_point_map = route_map,
                                           strata_map = realized_strata_map,
                                           concavity = 1)#concavity argument from concaveman()
 
+## see the map of connections
 print(car_stan_dat$map)
+
+## save the map of connections to a PDF for inspection
+if(!dir.exists(here::here("data","maps"))) dir.create(here::here("data","maps"), recursive = TRUE)
+pdf(here::here("data","maps",paste0("route_map_",firstYear,"-",lastYear,"_",
+                                     gsub(gsub(species,pattern = " ",replacement = "_",fixed = T),
+                                          pattern = "'",replacement = "",fixed = T),".pdf")))
+print(car_stan_dat$map)
+dev.off()
 
 # stan_data <- list()
 # stan_data[["count"]] <- new_data$count
@@ -162,38 +203,10 @@ print(car_stan_dat$map)
 
 
 ## Load covariates ####
-developed <- read.csv(here::here("data", "developed_1km", "developed.csv"))
-developed <- developed %>%
-  mutate(rt.uni = paste(StateNum, Route, sep = "-"))
-
-# drop the routes with no covariate information
-developed <- developed %>% 
-  filter(!is.na(developed))
-
-developed_full <- developed %>% 
-  rename(route = rt.uni) %>% 
-  select(route, year, developed) 
-
-# model_lm <- lm(developed ~ year, data = developed_full)
-# summary(model_lm)
-
-# developed_vis <- ggplot(data = developed,
-#                   aes(x = year,y = developed,
-#                       group = rt.uni))+
-#   geom_line(alpha = 0.2)
-# developed_vis
+# (covariate loading and new_data filtering now happens earlier, before routeF
+# and adjacency are built, so dimensions stay in sync.)
 
 # Calculate slope and mean -----------------------------------------
-# #create a data frame of each unique route in the species-specific dataset
-# route_map2 = unique(data.frame(route = new_data$route,
-#                                routeF = new_data$routeF,
-#                                strat = new_data$strat_name,
-#                                latitude = new_data$latitude,
-#                                longitude = new_data$longitude))
-# 
-
-# route_map2 <- route_map2 %>%
-#   separate(route, into = c("StateNum", "RouteNum"), sep = "-", convert = TRUE)
 route_df <- route_map %>% 
   sf::st_drop_geometry(route_map)
 
@@ -204,35 +217,30 @@ sl <- function(y,x){
   return(cc)
 }
 
-slope_full <- NULL
+# restrict covariate summaries to the routes that survived the BBS/adjacency
+# filtering so slope_full lines up 1:1 with routeF 1..nroutes
+developed_full <- developed_full %>%
+  filter(route %in% route_df$route)
 
 developed_route_mean_t <- developed_full %>% 
-  #filter(year < (firstYear + 10)) %>%  #first 10 years
   group_by(route) %>% 
-  summarise(mean_developed = mean(developed,na.rm = T))
+  summarise(mean_developed = mean(developed, na.rm = TRUE))
 
 developed_route_slope_t <- developed_full %>% 
-  arrange(year,route) %>% 
+  arrange(year, route) %>% 
   group_by(route) %>% 
-  summarise(slope_developed = sl(developed,year))
+  summarise(slope_developed = sl(developed, year))
 
-developed_tmp <- inner_join(developed_route_mean_t,developed_route_slope_t,
-                      by = "route")
-
-slope_full <- bind_rows(slope_full,developed_tmp)
-
-slope_full <- slope_full %>% 
-  left_join(.,route_df,
-            by = "route") %>% 
-  arrange(routeF)%>% 
+slope_full <- inner_join(developed_route_mean_t, developed_route_slope_t,
+                         by = "route") %>%
+  mutate(startYear = firstYear) %>%
+  left_join(route_df, by = "route") %>%
+  arrange(routeF) %>%
   filter(!is.na(routeF))
 
-# Drop count data with no covariate information -----------------------------------------
-
-new_data <- new_data %>% 
-  inner_join(.,developed_full,
-             by = c("route",
-                    "r_year" = "year"))
+# sanity check: one row per route, ordered by routeF
+stopifnot(nrow(slope_full) == max(new_data$routeF))
+stopifnot(identical(slope_full$routeF, seq_len(nrow(slope_full))))
 
 
 ### Build the data list required for Stan
@@ -258,23 +266,29 @@ stan_data[["N_edges"]] <- car_stan_dat$N_edges
 stan_data[["node1"]] <- car_stan_dat$node1
 stan_data[["node2"]] <- car_stan_dat$node2
 stan_data[["nroutes"]] <- max(stan_data$route)
-stan_data[["route_habitat"]] <- as.numeric(scale(slope_full$mean_developed))
-stan_data[["route_habitat_slope"]] <- as.numeric(scale(slope_full$slope_developed))
+stan_data[["route_habitat"]] <- as.numeric(slope_full$mean_developed - mean(slope_full$mean_developed, na.rm = TRUE))
+stan_data[["route_habitat_slope"]] <- 100 * (slope_full$slope_developed - mean(slope_full$slope_developed, na.rm = TRUE))
 
 
 if(car_stan_dat$N != stan_data[["nroutes"]]){stop("Some routes are missing from adjacency matrix")}
 
 dist_matrix_km <- dist_matrix(route_map,
                               strat_indicator = "routeF")
-# save(list = c("stan_data",
-#               "new_data",
-#               "route_map",
-#               "realized_strata_map",
-#               "car_stan_dat",
-#               "dist_matrix_km",
-#               "developed_full",
-#               "slope_full"),
-#      file = sp_data_file)
+
+# save prepped data so model fitting can be re-run without re-preparing
+species_f <- gsub(gsub(species,pattern = " ",replacement = "_",fixed = T),pattern = "'",replacement = "",fixed = T)
+if(!dir.exists(here::here("data","stan_data"))) dir.create(here::here("data","stan_data"), recursive = TRUE)
+sp_data_file <- here::here("data","stan_data",
+                           paste0(species_f,"_developed_",firstYear,"_",lastYear,"_stan_data.RData"))
+save(list = c("stan_data",
+              "new_data",
+              "route_map",
+              "realized_strata_map",
+              "car_stan_dat",
+              "dist_matrix_km",
+              "developed_full",
+              "slope_full"),
+     file = sp_data_file)
 
 
 ##Fit####
@@ -284,7 +298,7 @@ dist_matrix_km <- dist_matrix(route_map,
 ## considered as a cause of the spatial dependency in abundance we estimated the
 ## residual component of the intercept term with a non-spatial (simple random effect)
 ## Setting this `spatial_intercept` to TRUE will fit the model with the spatial residual term
-spatial_intercept <- FALSE
+spatial_intercept <- TRUE
 # trend habitat effects are not changed, but the intercept effect is
 # removes the optional spatial components for intercepts 
 stan_data[["fit_spatial"]] <- ifelse(spatial_intercept,1,0)
@@ -306,15 +320,14 @@ summ <- stanfit$summary()
 
 
 output_dir <- "output"
- 
+if(!dir.exists(output_dir)) dir.create(output_dir)
+
 spp1 <- "developed"
 spp <- paste0("_",spp1,"_")
 
-species_f <- gsub(gsub(species,pattern = " ",replacement = "_",fixed = T),pattern = "'",replacement = "",fixed = T)
 out_base <- paste0(species_f,spp,firstYear,"_",lastYear)
 
 print(paste(species, stanfit$time()[["total"]]))
-out_base <- paste0(species_f,spp,firstYear,"_",lastYear)
 
 saveRDS(stanfit, 
         paste0(output_dir,"/",out_base,"_stanfit.rds"))
