@@ -3,7 +3,7 @@
 # This script 
 # setwd("C:/Users/SmithAC/Documents/GitHub/Jefferys_etal")
 library(here)
-here::i_am("4 Jefferys_etal/Species_data_prep_mean_habitat_and_slope (original).R")
+here::i_am("4 Jefferys_etal/Species_data_prep_mean_habitat_and_slope.R")
 library(bbsBayes)
 library(tidyverse)
 library(cmdstanr)
