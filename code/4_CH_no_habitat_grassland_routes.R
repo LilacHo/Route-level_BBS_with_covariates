@@ -13,6 +13,7 @@
 library(bbsBayes2)
 library(tidyverse)
 library(cmdstanr)
+library(posterior)
 library(sf)
 library(here)
 
@@ -52,7 +53,7 @@ species_to_f <- function(sp) {
 
 # Compile the Stan model once (reused across species) ---------------------
 mod.file <- "models/slope_habitat_route_NB.stan"
-slope_model <- cmdstan_model(mod.file, stanc_options = list("Oexperimental"))
+slope_model <- cmdstan_model(mod.file, force_recompile = TRUE)
 
 # Helper: slope of a linear regression
 sl <- function(y, x) {
@@ -243,10 +244,12 @@ fit_species <- function(species, species_f, target_name, strat, firstYear, lastY
   stanfit <- slope_model$sample(
     data             = stan_data,
     refresh          = 400,
+    chains           = 4,
+    parallel_chains  = 4,
     iter_sampling    = 2000,
     iter_warmup      = 2000,
     max_treedepth    = 15,
-    parallel_chains  = 4,
+    show_exceptions  = TRUE,
     save_cmdstan_config = TRUE)
 
   summ <- stanfit$summary()
@@ -308,6 +311,12 @@ for (i in seq_len(nrow(grassland_spp))) {
                   slope_model = slope_model),
       error = function(e) {
         message("  [ERROR] Failed for ", sp, ": ", conditionMessage(e))
+        # Try to get CmdStan output files for diagnosis
+        out_files <- list.files(tempdir(), pattern = paste0(".*", species_to_f(sp), ".*"),
+                                full.names = TRUE, recursive = TRUE)
+        if (length(out_files) > 0) {
+          message("  Temp files found: ", paste(out_files, collapse = "\n    "))
+        }
         return(NULL)
       }
     )
@@ -316,7 +325,12 @@ for (i in seq_len(nrow(grassland_spp))) {
     route_map <- fit_result$route_map
   }
 
-  # Extract beta_resid posterior means per route
+  # Extract beta (full slope) and beta_resid (residual slope) per route
+  beta_df <- summ %>%
+    filter(str_detect(variable, "^beta\\[")) %>%
+    transmute(routeF = as.integer(str_extract(variable, "\\d+")),
+              beta = mean)
+
   beta_resid_df <- summ %>%
     filter(str_detect(variable, "^beta_resid\\[")) %>%
     transmute(routeF = as.integer(str_extract(variable, "\\d+")),
@@ -330,15 +344,27 @@ for (i in seq_len(nrow(grassland_spp))) {
     st_drop_geometry() %>%
     select(route, routeF, latitude, longitude)
 
-  # Compute CH_no_habitat per route
-  route_ch <- beta_resid_df %>%
-    mutate(CH_no_habitat = pct_cum(beta_resid, dt)) %>%
+  # Compute route-level CH, CH_no_habitat, CH_dif
+  route_ch <- beta_df %>%
+    left_join(beta_resid_df, by = "routeF") %>%
+    mutate(CH            = pct_cum(beta, dt),
+           CH_no_habitat = pct_cum(beta_resid, dt),
+           CH_dif        = CH - CH_no_habitat) %>%
     left_join(route_info, by = "routeF") %>%
     mutate(species      = sp,
            species_code = sp_code) %>%
-    select(species, species_code, route, routeF, latitude, longitude, CH_no_habitat)
+    select(species, species_code, route, routeF, latitude, longitude,
+           CH, CH_no_habitat, CH_dif)
 
   results_list[[sp]] <- route_ch
+
+  # Save per-species CSV
+  sp_out_dir <- here::here("output", "species_routes")
+  if (!dir.exists(sp_out_dir)) dir.create(sp_out_dir, recursive = TRUE)
+  write.csv(route_ch,
+            file.path(sp_out_dir, paste0(sp_f, "_route_CH.csv")),
+            row.names = FALSE)
+
   cat("  Done:", nrow(route_ch), "routes\n")
 }
 
@@ -354,7 +380,9 @@ cat("Total route-species rows:", nrow(ch_no_hab_all), "\n\n")
 print(ch_no_hab_all %>%
         group_by(species) %>%
         summarise(n_routes = n(),
-                  mean_CH_no_hab = mean(CH_no_habitat, na.rm = TRUE),
+                  mean_CH = mean(CH, na.rm = TRUE),
+                  mean_CH_no_habitat = mean(CH_no_habitat, na.rm = TRUE),
+                  mean_CH_dif = mean(CH_dif, na.rm = TRUE),
                   .groups = "drop"))
 
 # Save output -------------------------------------------------------------
