@@ -110,6 +110,86 @@ for (f in species_files) {
 }
 
 # Summary ------------------------------------------------------------------
-cat("\n=== Done ===\n")
+cat("\n=== SDM extraction done ===\n")
 cat("Output directory:", out_dir, "\n")
 cat("Files written:", length(list.files(out_dir, pattern = "\\.csv$")), "\n")
+
+# ==========================================================================
+# Violin plots: mean CH_no_habitat by rcp45 category for each species
+# ==========================================================================
+
+# Raster category labels
+rcp_labels <- c("0" = "Never suitable",
+                "1" = "Extirpation",
+                "2" = "Worsening",
+                "3" = "Slightly worsening",
+                "4" = "Neutral",
+                "5" = "Slightly improving",
+                "6" = "Improving",
+                "7" = "Colonization")
+
+# Create barplot output directory
+plot_dir <- here::here("output", "species_routes_sdm_plot")
+if (!dir.exists(plot_dir)) dir.create(plot_dir, recursive = TRUE)
+
+# Read all SDM CSVs and generate bar plots
+sdm_files <- list.files(out_dir, pattern = "_route_CH_sdm\\.csv$",
+                        full.names = TRUE)
+
+cat("\nGenerating bar plots for", length(sdm_files), "species...\n")
+
+for (sf in sdm_files) {
+  sp_data <- read.csv(sf)
+
+  abbr <- unique(sp_data$species_code)
+  sp_name <- unique(sp_data$species)
+
+  # Skip if plot already exists
+  plot_file <- file.path(plot_dir, paste0(abbr, "_CH_no_habitat_by_rcp.png"))
+  if (file.exists(plot_file)) {
+    cat("  Skipping plot (already exists):", basename(plot_file), "\n")
+    next
+  }
+
+  # Skip if no rcp data at all
+  if (all(is.na(sp_data$rcp45)) && all(is.na(sp_data$rcp85))) {
+    cat("  Skipping plot for", abbr, "— no rcp values\n")
+    next
+  }
+
+  # Reshape to long format for both scenarios
+  long_45 <- sp_data %>%
+    filter(!is.na(rcp45)) %>%
+    mutate(category = factor(rcp45, levels = 0:7),
+           scenario = "RCP 4.5") %>%
+    select(category, scenario, CH_no_habitat)
+
+  long_85 <- sp_data %>%
+    filter(!is.na(rcp85)) %>%
+    mutate(category = factor(rcp85, levels = 0:7),
+           scenario = "RCP 8.5") %>%
+    select(category, scenario, CH_no_habitat)
+
+  plot_data <- bind_rows(long_45, long_85)
+
+  # Create faceted violin plot (rcp45 and rcp85)
+  p <- ggplot(plot_data, aes(x = category, y = CH_no_habitat, fill = scenario)) +
+    geom_violin(trim = FALSE, scale = "width") +
+    geom_boxplot(width = 0.1, outlier.size = 0.5, fill = "white", alpha = 0.6) +
+    facet_wrap(~ scenario, ncol = 1) +
+    scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
+    labs(title = paste0(sp_name, " (", abbr, ")"),
+         subtitle = paste0("n = ", nrow(sp_data), " routes"),
+         x = "SDM classified change category",
+         y = "Residual (%)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+
+  # Save plot
+  ggsave(plot_file, p, width = 8, height = 8, dpi = 150)
+  cat("  Saved:", basename(plot_file), "\n")
+}
+
+cat("\n=== All done ===\n")
+cat("Violin plots saved to:", plot_dir, "\n")
