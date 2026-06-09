@@ -1,7 +1,10 @@
 # 5_add_SDM.R
-# Add rcp45 and rcp85 columns to output/CH_no_habitat_grassland_routes.csv
-# by extracting SDM classified-change raster values at each route location,
-# per species.
+# Add rcp45 and rcp85 columns to each individual species CSV in
+# output/species_routes/ by extracting SDM classified-change raster values
+# at each route location. Writes revised CSVs to output/species_routes_sdm/.
+#
+# Species abbreviations are looked up from data/spp_names_codes_group_aou.csv
+# using the species_code column already present in each route CSV.
 #
 # Raster value legend (from Smith et al. 2024):
 #   0 = never suitable
@@ -20,25 +23,51 @@ library(sf)
 
 here::i_am("code/5_add_SDM.R")
 
-# Read the route-level CH_no_habitat output --------------------------------
-ch_routes <- read.csv(here::here("output", "CH_no_habitat_grassland_routes.csv"))
+# Read species name/code lookup table --------------------------------------
+spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
 
-cat("Input rows:", nrow(ch_routes), "\n")
-cat("Species:", length(unique(ch_routes$species_code)), "\n")
+# List all species route CSVs ----------------------------------------------
+species_routes_dir <- here::here("output", "species_routes")
+species_files <- list.files(species_routes_dir, pattern = "_route_CH\\.csv$",
+                            full.names = TRUE)
 
-# Initialize new columns
-ch_routes$rcp45 <- NA
-ch_routes$rcp85 <- NA
+cat("Found", length(species_files), "species route files\n\n")
 
-# Loop through each species and extract raster values ----------------------
-species_codes <- unique(ch_routes$species_code)
+# Create output directory --------------------------------------------------
+out_dir <- here::here("output", "species_routes_sdm")
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
-for (abbr in species_codes) {
-  cat("Processing:", abbr, "\n")
+# Process each species file ------------------------------------------------
+for (f in species_files) {
 
-  # Subset routes for this species
-  idx <- which(ch_routes$species_code == abbr)
-  sp_routes <- ch_routes[idx, ]
+  # Skip if output already exists
+  out_file <- file.path(out_dir, sub("_route_CH\\.csv$", "_route_CH_sdm.csv", basename(f)))
+  if (file.exists(out_file)) {
+    cat("Skipping (already exists):", basename(out_file), "\n")
+    next
+  }
+
+  sp_routes <- read.csv(f)
+
+  # Get the species abbreviation from the CSV (should be unique per file)
+  abbr <- unique(sp_routes$species_code)
+  if (length(abbr) != 1) {
+    message("WARNING: Multiple species codes in ", basename(f), " — skipping")
+    next
+  }
+
+  # Verify abbreviation exists in lookup table
+  if (!abbr %in% spp_df$Code) {
+    message("WARNING: Code '", abbr, "' not found in spp_names_codes_group_aou.csv — skipping")
+    next
+  }
+
+  cat("Processing:", abbr, "(", basename(f), ")\n")
+
+  # Initialize new columns
+
+  sp_routes$rcp45 <- NA
+  sp_routes$rcp85 <- NA
 
   # Build raster file paths
   rcp45_file <- here::here("data", "rcp45_grasslands", abbr,
@@ -47,49 +76,40 @@ for (abbr in species_codes) {
                            paste0("grasslands_", abbr, "_breeding_2025_85_ENSEMBLE_classifiedchange.tif"))
 
   # Check that raster files exist
-
   if (!file.exists(rcp45_file)) {
-    message("  WARNING: rcp45 raster not found for ", abbr, " — skipping")
-    next
+    message("  WARNING: rcp45 raster not found for ", abbr, " — skipping extraction")
   }
   if (!file.exists(rcp85_file)) {
-    message("  WARNING: rcp85 raster not found for ", abbr, " — skipping")
-    next
+    message("  WARNING: rcp85 raster not found for ", abbr, " — skipping extraction")
   }
 
-  # Load rasters
-  rcp45_rast <- rast(rcp45_file)
-  rcp85_rast <- rast(rcp85_file)
+  # Extract rcp45 values
+  if (file.exists(rcp45_file)) {
+    rcp45_rast <- rast(rcp45_file)
+    routes_sv <- vect(sp_routes, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+    routes_sv_proj <- project(routes_sv, crs(rcp45_rast))
+    vals_45 <- extract(rcp45_rast, routes_sv_proj)
+    sp_routes$rcp45 <- vals_45[, 2]
+  }
 
-  # Convert route locations to SpatVector, project to raster CRS
-  routes_sv <- vect(sp_routes, geom = c("longitude", "latitude"), crs = "EPSG:4326")
-  routes_sv_proj <- project(routes_sv, crs(rcp45_rast))
+  # Extract rcp85 values
+  if (file.exists(rcp85_file)) {
+    rcp85_rast <- rast(rcp85_file)
+    routes_sv <- vect(sp_routes, geom = c("longitude", "latitude"), crs = "EPSG:4326")
+    routes_sv_proj <- project(routes_sv, crs(rcp85_rast))
+    vals_85 <- extract(rcp85_rast, routes_sv_proj)
+    sp_routes$rcp85 <- vals_85[, 2]
+  }
 
-  # Extract raster values at route points
-  vals_45 <- extract(rcp45_rast, routes_sv_proj)
-  vals_85 <- extract(rcp85_rast, routes_sv_proj)
+  # Write revised CSV to output/species_routes_sdm/
+  write.csv(sp_routes, out_file, row.names = FALSE)
 
-  # Assign extracted values back (column 2 holds the raster values)
-  ch_routes$rcp45[idx] <- vals_45[, 2]
-  ch_routes$rcp85[idx] <- vals_85[, 2]
+  cat("  Wrote:", basename(out_file),
+      "| rcp45 non-NA:", sum(!is.na(sp_routes$rcp45)),
+      "| rcp85 non-NA:", sum(!is.na(sp_routes$rcp85)), "\n")
 }
 
 # Summary ------------------------------------------------------------------
-cat("\n=== Summary ===\n")
-cat("Total rows:", nrow(ch_routes), "\n")
-cat("rcp45 non-NA:", sum(!is.na(ch_routes$rcp45)), "\n")
-cat("rcp85 non-NA:", sum(!is.na(ch_routes$rcp85)), "\n\n")
-
-print(ch_routes %>%
-        group_by(species_code) %>%
-        summarise(n_routes = n(),
-                  rcp45_mean = mean(rcp45, na.rm = TRUE),
-                  rcp85_mean = mean(rcp85, na.rm = TRUE),
-                  .groups = "drop"))
-
-# Overwrite the output CSV with new columns --------------------------------
-write.csv(ch_routes,
-          here::here("output", "CH_no_habitat_grassland_routes.csv"),
-          row.names = FALSE)
-
-cat("\nWrote: output/CH_no_habitat_grassland_routes.csv (with rcp45 and rcp85 columns)\n")
+cat("\n=== Done ===\n")
+cat("Output directory:", out_dir, "\n")
+cat("Files written:", length(list.files(out_dir, pattern = "\\.csv$")), "\n")
