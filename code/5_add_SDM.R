@@ -244,3 +244,128 @@ cat("Saved overall plot:", overall_plot_file, "\n")
 #           here::here("output", "species_routes_sdm", "ALL_species_route_CH_sdm.csv"),
 #           row.names = FALSE)
 # cat("Saved combined CSV: output/species_routes_sdm/ALL_species_route_CH_sdm.csv\n")
+
+# ==========================================================================
+# Repeat plots using CH (Full with habitat change)
+# ==========================================================================
+
+cat("\nGenerating CH violin plots (Full with habitat change)...\n")
+
+# Per-species CH violin plots
+for (sf in sdm_files) {
+  sp_data <- read.csv(sf)
+
+  abbr <- unique(sp_data$species_code)
+  sp_name <- unique(sp_data$species)
+
+  # Skip if plot already exists
+  plot_file <- file.path(plot_dir, paste0(abbr, "_CH_by_rcp.png"))
+  if (file.exists(plot_file)) {
+    cat("  Skipping plot (already exists):", basename(plot_file), "\n")
+    next
+  }
+
+  # Skip if no rcp data at all
+  if (all(is.na(sp_data$rcp45)) && all(is.na(sp_data$rcp85))) {
+    cat("  Skipping plot for", abbr, "— no rcp values\n")
+    next
+  }
+
+  # Reshape to long format for both scenarios
+  long_45 <- sp_data %>%
+    filter(!is.na(rcp45)) %>%
+    mutate(category = factor(rcp45, levels = 0:7),
+           scenario = "RCP 4.5") %>%
+    select(category, scenario, CH)
+
+  long_85 <- sp_data %>%
+    filter(!is.na(rcp85)) %>%
+    mutate(category = factor(rcp85, levels = 0:7),
+           scenario = "RCP 8.5") %>%
+    select(category, scenario, CH)
+
+  plot_data <- bind_rows(long_45, long_85)
+
+  # Create faceted violin plot
+  p <- ggplot(plot_data, aes(x = category, y = CH, fill = scenario)) +
+    geom_violin(trim = FALSE, scale = "width") +
+    geom_boxplot(width = 0.1, outlier.size = 0.5, fill = "white", alpha = 0.6) +
+    facet_wrap(~ scenario, ncol = 1) +
+    scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
+    labs(title = paste0(sp_name, " (", abbr, ")"),
+         subtitle = paste0("n = ", nrow(sp_data), " routes"),
+         x = "SDM classified change category",
+         y = "Full with habitat change (%)") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+
+  ggsave(plot_file, p, width = 8, height = 8, dpi = 150)
+  cat("  Saved:", basename(plot_file), "\n")
+}
+
+# Overall CH violin plot (all species combined)
+long_all_45_ch <- all_sdm %>%
+  filter(!is.na(rcp45)) %>%
+  mutate(category = factor(rcp45, levels = 0:7),
+         scenario = "RCP 4.5") %>%
+  select(category, scenario, CH)
+
+long_all_85_ch <- all_sdm %>%
+  filter(!is.na(rcp85)) %>%
+  mutate(category = factor(rcp85, levels = 0:7),
+         scenario = "RCP 8.5") %>%
+  select(category, scenario, CH)
+
+plot_all_ch <- bind_rows(long_all_45_ch, long_all_85_ch)
+
+p_all_ch <- ggplot(plot_all_ch, aes(x = category, y = CH, fill = scenario)) +
+  geom_violin(trim = FALSE, scale = "width") +
+  geom_boxplot(width = 0.1, outlier.size = 0.3, fill = "white", alpha = 0.6) +
+  facet_wrap(~ scenario, ncol = 1) +
+  scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
+  labs(title = "All grassland species combined",
+       subtitle = paste0("n = ", nrow(all_sdm), " route-species observations (",
+                         length(unique(all_sdm$species_code)), " species)"),
+       x = "SDM classified change category",
+       y = "Full with habitat change (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+overall_ch_plot_file <- file.path(plot_dir, "ALL_species_CH_by_rcp.png")
+ggsave(overall_ch_plot_file, p_all_ch, width = 8, height = 8, dpi = 150)
+cat("Saved overall CH plot:", overall_ch_plot_file, "\n")
+
+# Overall CH_dif violin plot (all species combined) -------------------------
+long_all_45_dif <- all_sdm %>%
+  filter(!is.na(rcp45)) %>%
+  mutate(category = factor(rcp45, levels = 0:7),
+         scenario = "RCP 4.5") %>%
+  select(category, scenario, CH_dif)
+
+long_all_85_dif <- all_sdm %>%
+  filter(!is.na(rcp85)) %>%
+  mutate(category = factor(rcp85, levels = 0:7),
+         scenario = "RCP 8.5") %>%
+  select(category, scenario, CH_dif)
+
+plot_all_dif <- bind_rows(long_all_45_dif, long_all_85_dif)
+
+p_all_dif <- ggplot(plot_all_dif, aes(x = category, y = CH_dif, fill = scenario)) +
+  geom_violin(trim = FALSE, scale = "width") +
+  geom_boxplot(width = 0.1, outlier.size = 0.3, fill = "white", alpha = 0.6) +
+  facet_wrap(~ scenario, ncol = 1) +
+  scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
+  labs(title = "All grassland species combined",
+       subtitle = paste0("n = ", nrow(all_sdm), " route-species observations (",
+                         length(unique(all_sdm$species_code)), " species)"),
+       x = "SDM classified change category",
+       y = "CH difference (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+overall_dif_plot_file <- file.path(plot_dir, "ALL_species_CH_dif_by_rcp.png")
+ggsave(overall_dif_plot_file, p_all_dif, width = 8, height = 8, dpi = 150)
+cat("Saved overall CH_dif plot:", overall_dif_plot_file, "\n")
