@@ -193,3 +193,54 @@ for (sf in sdm_files) {
 
 cat("\n=== All done ===\n")
 cat("Violin plots saved to:", plot_dir, "\n")
+
+# ==========================================================================
+# Combined: merge all species SDM files and create an overall violin plot
+# ==========================================================================
+
+cat("\nCombining all species SDM files...\n")
+
+all_sdm <- sdm_files %>%
+  map_dfr(read.csv)
+
+cat("Total rows:", nrow(all_sdm), "\n")
+cat("Species:", length(unique(all_sdm$species_code)), "\n")
+
+# Overall violin plot — RCP 4.5 and RCP 8.5 faceted
+long_all_45 <- all_sdm %>%
+  filter(!is.na(rcp45)) %>%
+  mutate(category = factor(rcp45, levels = 0:7),
+         scenario = "RCP 4.5") %>%
+  select(category, scenario, CH_no_habitat)
+
+long_all_85 <- all_sdm %>%
+  filter(!is.na(rcp85)) %>%
+  mutate(category = factor(rcp85, levels = 0:7),
+         scenario = "RCP 8.5") %>%
+  select(category, scenario, CH_no_habitat)
+
+plot_all <- bind_rows(long_all_45, long_all_85)
+
+p_all <- ggplot(plot_all, aes(x = category, y = CH_no_habitat, fill = scenario)) +
+  geom_violin(trim = FALSE, scale = "width") +
+  geom_boxplot(width = 0.1, outlier.size = 0.3, fill = "white", alpha = 0.6) +
+  facet_wrap(~ scenario, ncol = 1) +
+  scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
+  labs(title = "All grassland species combined",
+       subtitle = paste0("n = ", nrow(all_sdm), " route-species observations (",
+                         length(unique(all_sdm$species_code)), " species)"),
+       x = "SDM classified change category",
+       y = "Residual (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none")
+
+overall_plot_file <- file.path(plot_dir, "ALL_species_CH_no_habitat_by_rcp.png")
+ggsave(overall_plot_file, p_all, width = 8, height = 8, dpi = 150)
+cat("Saved overall plot:", overall_plot_file, "\n")
+
+# # Also save the combined CSV
+# write.csv(all_sdm,
+#           here::here("output", "species_routes_sdm", "ALL_species_route_CH_sdm.csv"),
+#           row.names = FALSE)
+# cat("Saved combined CSV: output/species_routes_sdm/ALL_species_route_CH_sdm.csv\n")
