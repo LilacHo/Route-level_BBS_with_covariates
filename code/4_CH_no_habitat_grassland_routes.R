@@ -10,7 +10,9 @@
 # a species, the full data-prep and model-fitting pipeline (as in script 1) is
 # run inline to produce them.
 
+# install.packages("concaveman")"
 library(bbsBayes2)
+# fetch_bbs_data()
 library(tidyverse)
 library(cmdstanr)
 library(posterior)

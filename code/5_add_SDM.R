@@ -6,7 +6,7 @@
 # Species abbreviations are looked up from data/spp_names_codes_group_aou.csv
 # using the species_code column already present in each route CSV.
 #
-# Raster value legend (from Smith et al. 2024):
+# Raster value legend (from Bateman et al. 2020):
 #   0 = never suitable
 #   1 = extirpation
 #   2 = worsening (-50 to -100% change)
@@ -227,8 +227,9 @@ p_all <- ggplot(plot_all, aes(x = category, y = CH_no_habitat, fill = scenario))
   facet_wrap(~ scenario, ncol = 1) +
   scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
   labs(title = "All grassland species combined",
-       subtitle = paste0("n = ", nrow(all_sdm), " route-species observations (",
-                         length(unique(all_sdm$species_code)), " species)"),
+       subtitle = paste0(nrow(all_sdm), " route-species observations across ",
+                         length(unique(all_sdm$route)), " unique routes and ",
+                         length(unique(all_sdm$species_code)), " species"),
        x = "SDM classified change category",
        y = "Residual (%)") +
   theme_minimal() +
@@ -325,8 +326,9 @@ p_all_ch <- ggplot(plot_all_ch, aes(x = category, y = CH, fill = scenario)) +
   facet_wrap(~ scenario, ncol = 1) +
   scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
   labs(title = "All grassland species combined",
-       subtitle = paste0("n = ", nrow(all_sdm), " route-species observations (",
-                         length(unique(all_sdm$species_code)), " species)"),
+       subtitle = paste0(nrow(all_sdm), " route-species observations across ",
+                         length(unique(all_sdm$route)), " unique routes and ",
+                         length(unique(all_sdm$species_code)), " species"),
        x = "SDM classified change category",
        y = "Full with habitat change (%)") +
   theme_minimal() +
@@ -358,8 +360,9 @@ p_all_dif <- ggplot(plot_all_dif, aes(x = category, y = CH_dif, fill = scenario)
   facet_wrap(~ scenario, ncol = 1) +
   scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
   labs(title = "All grassland species combined",
-       subtitle = paste0("n = ", nrow(all_sdm), " route-species observations (",
-                         length(unique(all_sdm$species_code)), " species)"),
+       subtitle = paste0(nrow(all_sdm), " route-species observations across ",
+                         length(unique(all_sdm$route)), " unique routes and ",
+                         length(unique(all_sdm$species_code)), " species"),
        x = "SDM classified change category",
        y = "CH difference (%)") +
   theme_minimal() +
@@ -369,3 +372,159 @@ p_all_dif <- ggplot(plot_all_dif, aes(x = category, y = CH_dif, fill = scenario)
 overall_dif_plot_file <- file.path(plot_dir, "ALL_species_CH_dif_by_rcp.png")
 ggsave(overall_dif_plot_file, p_all_dif, width = 8, height = 8, dpi = 150)
 cat("Saved overall CH_dif plot:", overall_dif_plot_file, "\n")
+
+# ==========================================================================
+# Statistical analysis: differences between SDM change categories (combined)
+# ==========================================================================
+
+cat("\n=== Statistical analysis (combined across all species) ===\n")
+
+stats_dir <- here::here("output", "species_routes_sdm_stats")
+if (!dir.exists(stats_dir)) dir.create(stats_dir, recursive = TRUE)
+
+stats_file <- file.path(stats_dir, "category_stats.txt")
+sink(stats_file)
+
+# Helper: run Kruskal-Wallis + pairwise Wilcoxon (BH-corrected) -------------
+run_category_tests <- function(df, response, group, scenario_label, response_label) {
+  d <- df %>%
+    filter(!is.na(.data[[response]]), !is.na(.data[[group]])) %>%
+    mutate(grp = factor(.data[[group]]))
+
+  cat("\n--------------------------------------------------\n")
+  cat(scenario_label, "|", response_label, "by", group, "\n")
+  cat("--------------------------------------------------\n")
+
+  # Need at least 2 groups with data
+  if (length(unique(d$grp)) < 2) {
+    cat("  Not enough groups for testing.\n")
+    return(invisible(NULL))
+  }
+
+  # Group sizes and medians
+  summ_tab <- d %>%
+    group_by(grp) %>%
+    summarise(n = n(),
+              median = median(.data[[response]]),
+              mean = mean(.data[[response]]),
+              .groups = "drop")
+  cat("\nGroup summary:\n")
+  print(as.data.frame(summ_tab), row.names = FALSE)
+
+  # Kruskal-Wallis omnibus test
+  kw <- kruskal.test(d[[response]] ~ d$grp)
+  cat("\nKruskal-Wallis test:\n")
+  cat("  chi-squared =", round(kw$statistic, 3),
+      ", df =", kw$parameter,
+      ", p-value =", format.pval(kw$p.value, digits = 4), "\n")
+
+  # Pairwise Wilcoxon (BH-corrected) if omnibus is informative
+  pw <- pairwise.wilcox.test(d[[response]], d$grp, p.adjust.method = "BH")
+  cat("\nPairwise Wilcoxon (BH-adjusted p-values):\n")
+  print(round(pw$p.value, 4))
+
+  invisible(list(kruskal = kw, pairwise = pw))
+}
+
+# Build combined long data with category as numeric per scenario -----------
+analysis_45 <- all_sdm %>%
+  filter(!is.na(rcp45)) %>%
+  transmute(category = rcp45, CH, CH_no_habitat, CH_dif)
+
+analysis_85 <- all_sdm %>%
+  filter(!is.na(rcp85)) %>%
+  transmute(category = rcp85, CH, CH_no_habitat, CH_dif)
+
+# Run tests across all 8 categories ----------------------------------------
+cat("\n##################################################\n")
+cat("# PART 1: All 8 SDM change categories (0-7)\n")
+cat("##################################################\n")
+
+for (resp in c("CH", "CH_no_habitat", "CH_dif")) {
+  resp_label <- switch(resp,
+                       CH = "Full with habitat change",
+                       CH_no_habitat = "Residual",
+                       CH_dif = "CH difference")
+  run_category_tests(analysis_45, resp, "category", "RCP 4.5", resp_label)
+  run_category_tests(analysis_85, resp, "category", "RCP 8.5", resp_label)
+}
+
+# ==========================================================================
+# PART 2: Grouped categories — contraction / stable / expansion
+#   1,2,3 = Contraction ; 4 = Stable ; 5,6,7 = Expansion
+#   (category 0 = never suitable, excluded)
+# ==========================================================================
+
+cat("\n##################################################\n")
+cat("# PART 2: Grouped categories (Contraction/Stable/Expansion)\n")
+cat("#   Contraction = 1,2,3 | Stable = 4 | Expansion = 5,6,7\n")
+cat("#   (category 0 = never suitable, excluded)\n")
+cat("##################################################\n")
+
+group_category <- function(x) {
+  dplyr::case_when(
+    x %in% c(1, 2, 3) ~ "Contraction",
+    x == 4            ~ "Stable",
+    x %in% c(5, 6, 7) ~ "Expansion",
+    TRUE              ~ NA_character_
+  )
+}
+
+analysis_45_grp <- analysis_45 %>%
+  mutate(change_group = factor(group_category(category),
+                               levels = c("Contraction", "Stable", "Expansion")))
+
+analysis_85_grp <- analysis_85 %>%
+  mutate(change_group = factor(group_category(category),
+                               levels = c("Contraction", "Stable", "Expansion")))
+
+for (resp in c("CH", "CH_no_habitat", "CH_dif")) {
+  resp_label <- switch(resp,
+                       CH = "Full with habitat change",
+                       CH_no_habitat = "Residual",
+                       CH_dif = "CH difference")
+  run_category_tests(analysis_45_grp, resp, "change_group", "RCP 4.5", resp_label)
+  run_category_tests(analysis_85_grp, resp, "change_group", "RCP 8.5", resp_label)
+}
+
+sink()
+cat("Saved statistics to:", stats_file, "\n")
+
+# ==========================================================================
+# Grouped violin plots (Contraction / Stable / Expansion)
+# ==========================================================================
+
+make_grouped_violin <- function(df45, df85, response, response_label, file_suffix) {
+  long45 <- df45 %>%
+    filter(!is.na(change_group)) %>%
+    transmute(change_group, scenario = "RCP 4.5", value = .data[[response]])
+  long85 <- df85 %>%
+    filter(!is.na(change_group)) %>%
+    transmute(change_group, scenario = "RCP 8.5", value = .data[[response]])
+  pdata <- bind_rows(long45, long85)
+
+  p <- ggplot(pdata, aes(x = change_group, y = value, fill = scenario)) +
+    geom_violin(trim = FALSE, scale = "width") +
+    geom_boxplot(width = 0.1, outlier.size = 0.3, fill = "white", alpha = 0.6) +
+    facet_wrap(~ scenario, ncol = 1) +
+    scale_fill_manual(values = c("RCP 4.5" = "steelblue", "RCP 8.5" = "firebrick")) +
+    labs(title = "All grassland species combined",
+         subtitle = paste0(nrow(all_sdm), " route-species observations across ",
+                           length(unique(all_sdm$route)), " unique routes and ",
+                           length(unique(all_sdm$species_code)), " species"),
+         x = "Range change group",
+         y = paste0(response_label, " (%)")) +
+    theme_minimal() +
+    theme(legend.position = "none")
+
+  out_f <- file.path(plot_dir, paste0("ALL_species_", file_suffix, "_by_group.png"))
+  ggsave(out_f, p, width = 7, height = 8, dpi = 150)
+  cat("Saved grouped plot:", out_f, "\n")
+}
+
+make_grouped_violin(analysis_45_grp, analysis_85_grp, "CH_no_habitat", "Residual", "CH_no_habitat")
+make_grouped_violin(analysis_45_grp, analysis_85_grp, "CH", "Full with habitat change", "CH")
+make_grouped_violin(analysis_45_grp, analysis_85_grp, "CH_dif", "CH difference", "CH_dif")
+
+cat("\n=== Statistical analysis complete ===\n")
+
