@@ -282,6 +282,14 @@ for (i in seq_len(nrow(grassland_spp))) {
 
   cat("\n[", i, "/", nrow(grassland_spp), "]", sp, "\n")
 
+  # Skip if the per-species output CSV already exists
+  sp_out_dir <- here::here("output", "species_routes")
+  sp_csv <- file.path(sp_out_dir, paste0(sp_f, "_route_CH.csv"))
+  if (file.exists(sp_csv)) {
+    cat("  Skipping (already exists):", basename(sp_csv), "\n")
+    next
+  }
+
   # Paths to pre-fitted output
 
   summ_file <- here::here("output",
@@ -361,7 +369,6 @@ for (i in seq_len(nrow(grassland_spp))) {
   results_list[[sp]] <- route_ch
 
   # Save per-species CSV
-  sp_out_dir <- here::here("output", "species_routes")
   if (!dir.exists(sp_out_dir)) dir.create(sp_out_dir, recursive = TRUE)
   write.csv(route_ch,
             file.path(sp_out_dir, paste0(sp_f, "_route_CH.csv")),
@@ -370,28 +377,6 @@ for (i in seq_len(nrow(grassland_spp))) {
   cat("  Done:", nrow(route_ch), "routes\n")
 }
 
-# ==========================================================================
-# Combine all species into one data frame
-# ==========================================================================
-ch_no_hab_all <- bind_rows(results_list)
-
 cat("\n=== Summary ===\n")
-cat("Species processed:", length(results_list), "\n")
-cat("Total route-species rows:", nrow(ch_no_hab_all), "\n\n")
-
-print(ch_no_hab_all %>%
-        group_by(species) %>%
-        summarise(n_routes = n(),
-                  mean_CH = mean(CH, na.rm = TRUE),
-                  mean_CH_no_habitat = mean(CH_no_habitat, na.rm = TRUE),
-                  mean_CH_dif = mean(CH_dif, na.rm = TRUE),
-                  .groups = "drop"))
-
-# Save output -------------------------------------------------------------
-if (!dir.exists(here::here("output"))) dir.create(here::here("output"))
-
-write.csv(ch_no_hab_all,
-          here::here("output", "CH_no_habitat_grassland_routes.csv"),
-          row.names = FALSE)
-
-cat("\nWrote: output/CH_no_habitat_grassland_routes.csv\n")
+cat("Species processed this run:", length(results_list), "\n")
+cat("Per-species CSVs in:", here::here("output", "species_routes"), "\n")
