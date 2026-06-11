@@ -46,7 +46,7 @@ grassland_spp <- spp_df %>%
   distinct(Common.Name, Code, .keep_all = TRUE)
 
 cat("Grassland species (n =", nrow(grassland_spp), "):\n")
-print(grassland_spp %>% select(Common.Name, Code))
+print(grassland_spp %>% select(Common.Name, Code, bbs_english))
 
 # Helper: convert species name to file-safe format (matches data-prep script)
 species_to_f <- function(sp) {
@@ -70,14 +70,14 @@ pct_cum <- function(b, dt) 100 * (exp(b * dt) - 1)
 # Function: run the full data-prep + fit pipeline for one species
 # (replicates code/1_Species_data_prep_covariate_mean_and_slope.R)
 # ==========================================================================
-fit_species <- function(species, species_f, target_name, strat, firstYear, lastYear,
+fit_species <- function(species, species_bbs, species_f, target_name, strat, firstYear, lastYear,
                         year_range, cov_csv, mean_col, slope_col,
                         spatial_intercept, slope_model) {
 
   cat("    Running full data-prep + model fit for:", species, "\n")
 
   # BBS data ---------------------------------------------------------------
-  data_pkg <- bbsBayes2::stratify(by = strat, species = species,
+  data_pkg <- bbsBayes2::stratify(by = strat, species = species_bbs,
                                   use_map = FALSE) %>%
     bbsBayes2::prepare_data(min_year = firstYear,
                             max_year = lastYear,
@@ -279,6 +279,7 @@ for (i in seq_len(nrow(grassland_spp))) {
   sp      <- grassland_spp$Common.Name[i]
   sp_f    <- species_to_f(sp)
   sp_code <- grassland_spp$Code[i]
+  sp_bbs  <- grassland_spp$bbs_english[i]   # name used to look up species in BBS
 
   cat("\n[", i, "/", nrow(grassland_spp), "]", sp, "\n")
 
@@ -308,6 +309,7 @@ for (i in seq_len(nrow(grassland_spp))) {
     cat("  No existing fit found — running data prep + model fit\n")
     fit_result <- tryCatch(
       fit_species(species = sp,
+                  species_bbs = sp_bbs,
                   species_f = sp_f,
                   target_name = target_name,
                   strat = strat,
