@@ -1,16 +1,20 @@
-# Calculate route-level CH_no_habitat (grassland covariate model) for all
-# grassland species. Outputs a single data frame with:
-#   species, route, routeF, latitude, longitude, CH_no_habitat
+# Calculate route-level CH_no_habitat (habitat covariate model) for all
+# species in a target group (e.g., grasslands, aridlands). Outputs one CSV
+# per species with:
+#   species, route, routeF, latitude, longitude, CH, CH_no_habitat, CH_dif
 #
 # CH_no_habitat_route[s] = 100 * (exp(beta_resid[s] * dt) - 1)
 #   where dt = lastYear - firstYear, and beta_resid[s] is the posterior mean
-#   of the residual slope (trend net of the grassland habitat-change component).
+#   of the residual slope (trend net of the habitat-change component for the
+#   target group).
 #
 # If pre-fitted output files (summ_fit.rds + stan_data.RData) do not exist for
-# a species, the full data-prep and model-fitting pipeline (as in script 1) is
-# run inline to produce them.
+# a species, the full data-prep and model-fitting pipeline is run inline to
+# produce them.
+#
+# To run for a different group, change `target_name` in the Settings block.
 
-# install.packages("concaveman")"
+# install.packages("concaveman")
 library(bbsBayes2)
 # fetch_bbs_data()
 library(tidyverse)
@@ -23,7 +27,9 @@ here::i_am("code/1_CH_no_habitat_routes.R")
 source("functions/neighbours_define_voronoi.R")
 
 # Settings ----------------------------------------------------------------
-target_name <- "grasslands"
+target_name <- "grasslands"   # target group: must match a value in the
+                              # 'Group' column of spp_names_codes_group_aou.csv
+                              # and the covariate file data/<target_name>.csv
 firstYear   <- 2010
 lastYear    <- 2024
 year_range  <- firstYear:lastYear
@@ -37,15 +43,15 @@ cov_csv  <- here::here("data",  paste0(target_name, ".csv"))
 mean_col <- paste0("mean_", target_name)
 slope_col <- paste0("slope_", target_name)
 
-# Grassland species list --------------------------------------------------
+# Target group species list -----------------------------------------------
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
 
-grassland_spp <- spp_df %>%
-  filter(Group == target_name) %>%  # subject to change
+target_spp <- spp_df %>%
+  filter(Group == target_name) %>%
   distinct(Common.Name, Code, .keep_all = TRUE)
 
-cat("Grassland species (n =", nrow(grassland_spp), "):\n")
-print(grassland_spp %>% select(Common.Name, Code, bbs_english))
+cat(target_name, "species (n =", nrow(target_spp), "):\n")
+print(target_spp %>% select(Common.Name, Code, bbs_english))
 
 # Helper: convert species name to file-safe format (matches data-prep script)
 species_to_f <- function(sp) {
@@ -67,7 +73,6 @@ pct_cum <- function(b, dt) 100 * (exp(b * dt) - 1)
 
 # ==========================================================================
 # Function: run the full data-prep + fit pipeline for one species
-# (replicates code/1_Species_data_prep_covariate_mean_and_slope.R)
 # ==========================================================================
 fit_species <- function(species, species_bbs, species_f, target_name, strat, firstYear, lastYear,
                         year_range, cov_csv, mean_col, slope_col,
@@ -270,17 +275,17 @@ fit_species <- function(species, species_bbs, species_f, target_name, strat, fir
 }
 
 # ==========================================================================
-# Main loop: compute CH_no_habitat per route for each grassland species
+# Main loop: compute CH_no_habitat per route for each species in the group
 # ==========================================================================
 results_list <- list()
 
-for (i in seq_len(nrow(grassland_spp))) {
-  sp      <- grassland_spp$Common.Name[i]
+for (i in seq_len(nrow(target_spp))) {
+  sp      <- target_spp$Common.Name[i]
   sp_f    <- species_to_f(sp)
-  sp_code <- grassland_spp$Code[i]
-  sp_bbs  <- grassland_spp$bbs_english[i]   # name used to look up species in BBS
+  sp_code <- target_spp$Code[i]
+  sp_bbs  <- target_spp$bbs_english[i]   # name used to look up species in BBS
 
-  cat("\n[", i, "/", nrow(grassland_spp), "]", sp, "\n")
+  cat("\n[", i, "/", nrow(target_spp), "]", sp, "\n")
 
   # Skip if the per-species output CSV already exists
   sp_out_dir <- here::here("output", "species_routes")
