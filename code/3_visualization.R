@@ -1,9 +1,9 @@
-# 6_visualization.R
+# 3_visualization.R
 
 library(here)
 library(tidyverse)
 
-here::i_am("code/6_visualization.R")
+here::i_am("code/3_visualization.R")
 
 # ==========================================================================
 # Violin plots: mean CH_no_habitat by rcp45 category for each species

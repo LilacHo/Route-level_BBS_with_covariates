@@ -19,11 +19,11 @@ library(posterior)
 library(sf)
 library(here)
 
-here::i_am("code/4_CH_no_habitat_grassland_routes.R")
+here::i_am("code/1_CH_no_habitat_routes.R")
 source("functions/neighbours_define_voronoi.R")
 
 # Settings ----------------------------------------------------------------
-target_name <- "grassland"
+target_name <- "grasslands"
 firstYear   <- 2010
 lastYear    <- 2024
 year_range  <- firstYear:lastYear
@@ -33,8 +33,7 @@ strat <- "bbs_usgs"
 spatial_intercept <- TRUE
 
 # Derived covariate names
-cov_dir  <- paste0(target_name, "_1km")
-cov_csv  <- here::here("data", cov_dir, paste0(target_name, ".csv"))
+cov_csv  <- here::here("data",  paste0(target_name, ".csv"))
 mean_col <- paste0("mean_", target_name)
 slope_col <- paste0("slope_", target_name)
 
@@ -42,7 +41,7 @@ slope_col <- paste0("slope_", target_name)
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
 
 grassland_spp <- spp_df %>%
-  filter(Group == "grasslands") %>%
+  filter(Group == target_name) %>%  # subject to change
   distinct(Common.Name, Code, .keep_all = TRUE)
 
 cat("Grassland species (n =", nrow(grassland_spp), "):\n")

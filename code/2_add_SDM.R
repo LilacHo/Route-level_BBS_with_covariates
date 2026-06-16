@@ -1,4 +1,4 @@
-# 5_add_SDM.R
+# 2_add_SDM.R
 # Add rcp45 and rcp85 columns to each individual species CSV in
 # output/species_routes/ by extracting SDM classified-change raster values
 # at each route location. Writes revised CSVs to output/species_routes_sdm/.
@@ -21,7 +21,7 @@ library(tidyverse)
 library(terra)
 library(sf)
 
-here::i_am("code/5_add_SDM.R")
+here::i_am("code/2_add_SDM.R")
 
 # Read species name/code lookup table --------------------------------------
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
