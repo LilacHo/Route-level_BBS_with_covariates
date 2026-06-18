@@ -12,7 +12,7 @@
 # a species, the full data-prep and model-fitting pipeline is run inline to
 # produce them.
 #
-# To run for a different group, change `target_name` in the Settings block.
+# To run for a different group, change `land_cover` in the Settings block.
 
 # install.packages("concaveman")
 library(bbsBayes2)
@@ -27,9 +27,9 @@ here::i_am("code/1_CH_no_habitat_routes.R")
 source("functions/neighbours_define_voronoi.R")
 
 # Settings ----------------------------------------------------------------
-target_name <- "grasslands"   # target group: must match a value in the
+land_cover <- "grasslands"   # target group: must match a value in the
                               # 'Group' column of spp_names_codes_group_aou.csv
-                              # and the covariate file data/<target_name>.csv
+                              # and the covariate file data/<land_cover>.csv
 firstYear   <- 2010
 lastYear    <- 2024
 year_range  <- firstYear:lastYear
@@ -39,18 +39,18 @@ strat <- "bbs_usgs"
 spatial_intercept <- TRUE
 
 # Derived covariate names
-cov_csv  <- here::here("data",  paste0(target_name, ".csv"))
-mean_col <- paste0("mean_", target_name)
-slope_col <- paste0("slope_", target_name)
+cov_csv  <- here::here("data",  paste0(land_cover, ".csv"))
+mean_col <- paste0("mean_", land_cover)
+slope_col <- paste0("slope_", land_cover)
 
 # Target group species list -----------------------------------------------
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
 
 target_spp <- spp_df %>%
-  filter(Group == target_name) %>%
+  filter(Group == land_cover) %>%
   distinct(Common.Name, Code, .keep_all = TRUE)
 
-cat(target_name, "species (n =", nrow(target_spp), "):\n")
+cat(land_cover, "species (n =", nrow(target_spp), "):\n")
 print(target_spp %>% select(Common.Name, Code, bbs_english))
 
 # Helper: convert species name to file-safe format (matches data-prep script)
@@ -74,7 +74,7 @@ pct_cum <- function(b, dt) 100 * (exp(b * dt) - 1)
 # ==========================================================================
 # Function: run the full data-prep + fit pipeline for one species
 # ==========================================================================
-fit_species <- function(species, species_bbs, species_f, target_name, strat, firstYear, lastYear,
+fit_species <- function(species, species_bbs, species_f, land_cover, strat, firstYear, lastYear,
                         year_range, cov_csv, mean_col, slope_col,
                         spatial_intercept, slope_model) {
 
@@ -131,11 +131,11 @@ fit_species <- function(species, species_bbs, species_f, target_name, strat, fir
     mutate(rt.uni = paste(StateNum, Route, sep = "-"))
 
   cov_full <- cov_raw %>%
-    filter(!is.na(.data[[target_name]])) %>%
+    filter(!is.na(.data[[land_cover]])) %>%
     rename(route = rt.uni) %>%
     transmute(route,
               year,
-              cov_value = .data[[target_name]]) %>%
+              cov_value = .data[[land_cover]]) %>%
     filter(year %in% year_range)
 
   # Drop routes with no covariate
@@ -180,7 +180,7 @@ fit_species <- function(species, species_bbs, species_f, target_name, strat, fir
   # Save map PDF
   if (!dir.exists(here::here("data", "maps"))) dir.create(here::here("data", "maps"), recursive = TRUE)
   pdf(here::here("data", "maps",
-                 paste0("route_map_", firstYear, "-", lastYear, "_", species_f, "_", target_name, ".pdf")))
+                 paste0("route_map_", firstYear, "-", lastYear, "_", species_f, "_", land_cover, ".pdf")))
   print(car_stan_dat$map)
   dev.off()
 
@@ -240,10 +240,10 @@ fit_species <- function(species, species_bbs, species_f, target_name, strat, fir
   # Save stan_data ---------------------------------------------------------
   if (!dir.exists(here::here("data", "stan_data"))) dir.create(here::here("data", "stan_data"), recursive = TRUE)
   sp_data_file <- here::here("data", "stan_data",
-                             paste0(species_f, "_", target_name, "_",
+                             paste0(species_f, "_", land_cover, "_",
                                     firstYear, "_", lastYear, "_stan_data.RData"))
   save(list = c("stan_data", "new_data", "route_map", "realized_strata_map",
-                "car_stan_dat", "dist_matrix_km", "cov_full", "slope_full", "target_name"),
+                "car_stan_dat", "dist_matrix_km", "cov_full", "slope_full", "land_cover"),
        file = sp_data_file)
 
   # Fit model --------------------------------------------------------------
@@ -264,7 +264,7 @@ fit_species <- function(species, species_bbs, species_f, target_name, strat, fir
   output_dir <- here::here("output")
   if (!dir.exists(output_dir)) dir.create(output_dir)
 
-  out_base <- paste0(species_f, "_", target_name, "_", firstYear, "_", lastYear)
+  out_base <- paste0(species_f, "_", land_cover, "_", firstYear, "_", lastYear)
   saveRDS(stanfit, file.path(output_dir, paste0(out_base, "_stanfit.rds")))
   saveRDS(summ,    file.path(output_dir, paste0(out_base, "_summ_fit.rds")))
 
@@ -288,8 +288,10 @@ for (i in seq_len(nrow(target_spp))) {
   cat("\n[", i, "/", nrow(target_spp), "]", sp, "\n")
 
   # Skip if the per-species output CSV already exists
+  # Per-species CSVs are organized by target group:
+  #   output/species_routes/<land_cover>_<species>_route_CH.csv
   sp_out_dir <- here::here("output", "species_routes")
-  sp_csv <- file.path(sp_out_dir, paste0(sp_f, "_route_CH.csv"))
+  sp_csv <- file.path(sp_out_dir, paste0(land_cover, "_", sp_f, "_route_CH.csv"))
   if (file.exists(sp_csv)) {
     cat("  Skipping (already exists):", basename(sp_csv), "\n")
     next
@@ -298,10 +300,10 @@ for (i in seq_len(nrow(target_spp))) {
   # Paths to pre-fitted output
 
   summ_file <- here::here("output",
-                          paste0(sp_f, "_", target_name, "_",
+                          paste0(sp_f, "_", land_cover, "_",
                                  firstYear, "_", lastYear, "_summ_fit.rds"))
   stan_data_file <- here::here("data", "stan_data",
-                               paste0(sp_f, "_", target_name, "_",
+                               paste0(sp_f, "_", land_cover, "_",
                                       firstYear, "_", lastYear, "_stan_data.RData"))
 
   # If both files exist, load them; otherwise run full pipeline
@@ -315,7 +317,7 @@ for (i in seq_len(nrow(target_spp))) {
       fit_species(species = sp,
                   species_bbs = sp_bbs,
                   species_f = sp_f,
-                  target_name = target_name,
+                  land_cover = land_cover,
                   strat = strat,
                   firstYear = firstYear,
                   lastYear = lastYear,
@@ -368,16 +370,17 @@ for (i in seq_len(nrow(target_spp))) {
            CH_dif        = CH - CH_no_habitat) %>%
     left_join(route_info, by = "routeF") %>%
     mutate(species      = sp,
-           species_code = sp_code) %>%
-    select(species, species_code, route, routeF, latitude, longitude,
-           CH, CH_no_habitat, CH_dif)
+           species_code = sp_code,
+           land_cover   = land_cover) %>%
+    select(species, species_code, land_cover, route, routeF,
+           latitude, longitude, CH, CH_no_habitat, CH_dif)
 
   results_list[[sp]] <- route_ch
 
   # Save per-species CSV
   if (!dir.exists(sp_out_dir)) dir.create(sp_out_dir, recursive = TRUE)
   write.csv(route_ch,
-            file.path(sp_out_dir, paste0(sp_f, "_route_CH.csv")),
+            file.path(sp_out_dir, paste0(land_cover, "_", sp_f, "_route_CH.csv")),
             row.names = FALSE)
 
   cat("  Done:", nrow(route_ch), "routes\n")

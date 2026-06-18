@@ -23,6 +23,11 @@ library(sf)
 
 here::i_am("code/2_add_SDM.R")
 
+# Settings -----------------------------------------------------------------
+land_cover <- "grasslands"   # target group: drives the SDM raster directory
+                              # names (rcp45_<land_cover>/, rcp85_<land_cover>/)
+                              # and the raster file name prefix (<land_cover>_)
+
 # Read species name/code lookup table --------------------------------------
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
 
@@ -70,10 +75,10 @@ for (f in species_files) {
   sp_routes$rcp85 <- NA
 
   # Build raster file paths
-  rcp45_file <- here::here("data", "rcp45_grasslands", abbr,
-                           paste0("grasslands_", abbr, "_breeding_2025_45_ENSEMBLE_classifiedchange.tif"))
-  rcp85_file <- here::here("data", "rcp85_grasslands", abbr,
-                           paste0("grasslands_", abbr, "_breeding_2025_85_ENSEMBLE_classifiedchange.tif"))
+  rcp45_file <- here::here("data", paste0("rcp45_", land_cover), abbr,
+                           paste0(land_cover, "_", abbr, "_breeding_2025_45_ENSEMBLE_classifiedchange.tif"))
+  rcp85_file <- here::here("data", paste0("rcp85_", land_cover), abbr,
+                           paste0(land_cover, "_", abbr, "_breeding_2025_85_ENSEMBLE_classifiedchange.tif"))
 
   # Check that raster files exist
   if (!file.exists(rcp45_file)) {
