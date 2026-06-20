@@ -20,6 +20,7 @@
 
 # RStudio files
 .Rproj.user/
+*.Rproj
 
 # produced vignettes
 vignettes/*.html
@@ -47,3 +48,9 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Project-specific data and output (large/derived files)
+data/**/*.tif
+data/maps/*.pdf
+data/stan_data/*.RData
+output/

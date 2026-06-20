@@ -1,10 +1,22 @@
 # 2_add_SDM.R
-# Add rcp45 and rcp85 columns to each individual species CSV in
-# output/species_routes/ by extracting SDM classified-change raster values
-# at each route location. Writes revised CSVs to output/species_routes_sdm/.
+# Add rcp45 and rcp85 climate-scenario columns to each per-species route CSV
+# in output/species_routes/ by extracting SDM classified-change raster values
+# at each route location, and write the revised CSVs to
+# output/species_routes_sdm/.
 #
-# Species abbreviations are looked up from data/spp_names_codes_group_aou.csv
-# using the species_code column already present in each route CSV.
+# Workflow (per *_route_CH.csv file):
+#   1. Skip the file if its *_route_CH_sdm.csv output already exists.
+#   2. Read the species code (species_code column, one code per file).
+#   3. Look up that code in data/spp_names_codes_group_aou.csv to get its land
+#      cover group (Group column). The group is resolved per species rather
+#      than hard-coded, so files from any group are handled in one run.
+#   4. Build the rcp45/rcp85 raster paths from the group, which drives both the
+#      directory (rcp45_<group>/, rcp85_<group>/) and the file name prefix
+#      (<group>_<code>_breeding_2025_<45|85>_ENSEMBLE_classifiedchange.tif).
+#   5. If either raster is missing, skip the species and write no output.
+#   6. Otherwise extract raster values at each route's longitude/latitude
+#      (reprojected to the raster CRS) into the rcp45 and rcp85 columns and
+#      write the result to output/species_routes_sdm/.
 #
 # Raster value legend (from Bateman et al. 2020):
 #   0 = never suitable
@@ -22,11 +34,6 @@ library(terra)
 library(sf)
 
 here::i_am("code/2_add_SDM.R")
-
-# Settings -----------------------------------------------------------------
-land_cover <- "grasslands"   # target group: drives the SDM raster directory
-                              # names (rcp45_<land_cover>/, rcp85_<land_cover>/)
-                              # and the raster file name prefix (<land_cover>_)
 
 # Read species name/code lookup table --------------------------------------
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
@@ -67,7 +74,14 @@ for (f in species_files) {
     next
   }
 
-  cat("Processing:", abbr, "(", basename(f), ")\n")
+  # Look up this species' land cover group (drives raster dir + file prefix)
+  land_cover <- unique(spp_df$Group[spp_df$Code == abbr])
+  if (length(land_cover) != 1 || is.na(land_cover) || land_cover == "") {
+    message("WARNING: No unique Group for code '", abbr, "' — skipping")
+    next
+  }
+
+  cat("Processing:", abbr, "[", land_cover, "] (", basename(f), ")\n")
 
   # Initialize new columns
 
@@ -80,12 +94,15 @@ for (f in species_files) {
   rcp85_file <- here::here("data", paste0("rcp85_", land_cover), abbr,
                            paste0(land_cover, "_", abbr, "_breeding_2025_85_ENSEMBLE_classifiedchange.tif"))
 
-  # Check that raster files exist
+  # Require both raster files; skip the species (no output written) if either
+  # is missing.
   if (!file.exists(rcp45_file)) {
-    message("  WARNING: rcp45 raster not found for ", abbr, " — skipping extraction")
+    message("  WARNING: rcp45 raster not found for ", abbr, " — skipping (no file written)")
+    next
   }
   if (!file.exists(rcp85_file)) {
-    message("  WARNING: rcp85 raster not found for ", abbr, " — skipping extraction")
+    message("  WARNING: rcp85 raster not found for ", abbr, " — skipping (no file written)")
+    next
   }
 
   # Extract rcp45 values
