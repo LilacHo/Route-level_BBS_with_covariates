@@ -15,31 +15,41 @@ library(multcompView) # multcompView converts pairwise p-values into compact let
 
 here::i_am("code/3_statistical_analysis_and_visualization.R")
 
+# Settings -----------------------------------------------------------------
+land_cover <- "aridlands"   # target group: only SDM CSVs named <land_cover>_<species>_route_CH_sdm.csv are included in the combined analysis and plots
+
 out_dir   <- here::here("output", "species_routes_sdm")
 stats_dir <- here::here("output", "species_routes_sdm_stats")
 plot_dir  <- here::here("output", "species_routes_sdm_plot")
-if (!dir.exists(stats_dir)) dir.create(stats_dir, recursive = TRUE)
-if (!dir.exists(plot_dir))  dir.create(plot_dir,  recursive = TRUE)
+per_species_dir <- file.path(plot_dir, "per_species")
+if (!dir.exists(stats_dir))       dir.create(stats_dir,       recursive = TRUE)
+if (!dir.exists(plot_dir))        dir.create(plot_dir,        recursive = TRUE)
+if (!dir.exists(per_species_dir)) dir.create(per_species_dir, recursive = TRUE)
 
-# Read all SDM CSVs
-sdm_files <- list.files(out_dir, pattern = "_route_CH_sdm\\.csv$",
+# Read SDM CSVs for the target land_cover only
+sdm_files <- list.files(out_dir,
+                        pattern = paste0("^", land_cover, "_.*_route_CH_sdm\\.csv$"),
                         full.names = TRUE)
+
+if (length(sdm_files) == 0) {
+  stop("No SDM CSVs found for land_cover = '", land_cover, "' in ", out_dir)
+}
 
 cat("\nCombining all species SDM files...\n")
 
-all_sdm <- sdm_files %>%
+target_sdm <- sdm_files %>%
   map_dfr(read.csv)
 
-cat("Total rows:", nrow(all_sdm), "\n")
-cat("Species:", length(unique(all_sdm$species_code)), "\n")
+cat("Total rows:", nrow(target_sdm), "\n")
+cat(land_cover, "species:", length(unique(target_sdm$species_code)), "\n")
 
 # Build combined analysis data ---------------------------------------------
-analysis_45 <- all_sdm %>%
+analysis_45 <- target_sdm %>%
   filter(!is.na(rcp45)) %>%
   transmute(route, species_code, category = rcp45, CH_no_habitat,
             route_num = as.integer(sub("^\\d+-", "", route)))
 
-analysis_85 <- all_sdm %>%
+analysis_85 <- target_sdm %>%
   filter(!is.na(rcp85)) %>%
   transmute(route, species_code, category = rcp85, CH_no_habitat,
             route_num = as.integer(sub("^\\d+-", "", route)))
@@ -63,7 +73,7 @@ analysis_85_grp <- analysis_85 %>%
   mutate(change_group = factor(group_category(category),
                                levels = c("Contraction", "Stable", "Expansion")))
 
-species_list <- unique(all_sdm$species_code)
+target_species_list <- unique(target_sdm$species_code)
 
 cat8_levels <- as.character(0:7)
 grp_levels  <- c("Contraction", "Stable", "Expansion")
@@ -188,7 +198,7 @@ compute_cld_layer <- function(df, response, group, group_levels, scenario_label)
 make_violin_cld <- function(df45, df85, group, group_levels,
                             title, subtitle, x_lab, file_name,
                             response = "CH_no_habitat",
-                            angle_x = FALSE) {
+                            dir = plot_dir) {
   long45 <- df45 %>%
     filter(!is.na(.data[[group]]), !is.na(.data[[response]])) %>%
     transmute(grp = factor(.data[[group]], levels = group_levels),
@@ -218,12 +228,19 @@ make_violin_cld <- function(df45, df85, group, group_levels,
     geom_text(data = count_data, aes(x = grp, y = -Inf, label = n),
               vjust = -0.5, size = 2.5, inherit.aes = FALSE) +
     facet_wrap(~ scenario, ncol = 1) +
-    scale_fill_manual(values = c("RCP 4.5" = "steelblue",
-                                 "RCP 8.5" = "firebrick")) +
+    scale_fill_manual(values = c("RCP 4.5" = "#0072B2",   # Okabe-Ito blue
+                                 "RCP 8.5" = "#D55E00")) + # Okabe-Ito vermillion
     labs(title = title, subtitle = subtitle,
-         x = x_lab, y = "Residual (%)") +
+         x = x_lab, y = "Habitat-adjusted population change (%)") +
     theme_minimal() +
-    theme(legend.position = "none")
+    theme(legend.position = "none",
+          plot.title    = element_text(size = 18, face = "bold"),
+          plot.subtitle = element_text(size = 13),
+          strip.text    = element_text(size = 14, face = "bold"),
+          axis.title.x = element_text(size = 14, face = "bold"),
+          axis.title.y = element_text(size = 14, face = "bold"),
+          axis.text.x  = element_text(size = 12, face = "bold"),
+          axis.text.y  = element_text(size = 12, face = "bold"))
 
   if (!is.null(cld_data) && nrow(cld_data) > 0) {
     p <- p + geom_text(data = cld_data,
@@ -232,11 +249,7 @@ make_violin_cld <- function(df45, df85, group, group_levels,
                        inherit.aes = FALSE)
   }
 
-  if (angle_x) {
-    p <- p + theme(axis.text.x = element_text(angle = 45, hjust = 1))
-  }
-
-  out_f <- file.path(plot_dir, file_name)
+  out_f <- file.path(dir, file_name)
   ggsave(out_f, p, width = 8, height = 8, dpi = 150)
   cat("Saved plot:", basename(out_f), "\n")
   invisible(out_f)
@@ -247,7 +260,7 @@ make_violin_cld <- function(df45, df85, group, group_levels,
 # PART 1: All 8 SDM categories (0-7) — all species ####
 # ==========================================================================
 
-stats_file_8cat <- file.path(stats_dir, "category_stats_8categories.txt")
+stats_file_8cat <- file.path(stats_dir, paste0(land_cover, "_category_stats_8categories.txt"))
 sink(stats_file_8cat)
 
 cat("\n##################################################\n")
@@ -264,13 +277,12 @@ cat("Saved Part 1 (all-species 8-category) statistics to:", stats_file_8cat, "\n
 make_violin_cld(
   analysis_45, analysis_85,
   group = "category", group_levels = cat8_levels,
-  title = "All grassland species combined",
-  subtitle = paste0(nrow(all_sdm), " route-species observations across ",
-                    length(unique(all_sdm$route)), " unique routes and ",
-                    length(unique(all_sdm$species_code)), " species"),
+  title = paste0("All ", land_cover, " species combined"),
+  subtitle = paste0(nrow(target_sdm), " route-species observations across ",
+                    length(unique(target_sdm$route)), " unique routes and ",
+                    length(unique(target_sdm$species_code)), " species"),
   x_lab = "SDM classified change category",
-  file_name = "ALL_species_CH_no_habitat_by_rcp_cld.png",
-  angle_x = TRUE
+  file_name = paste0(land_cover, "_ALL_species_CH_no_habitat_by_rcp_cld.png")
 )
 
 
@@ -279,7 +291,7 @@ make_violin_cld(
 # ==========================================================================
 
 stats_file_species_8cat <- file.path(stats_dir,
-                                      "category_stats_by_species_8categories.txt")
+                                      paste0(land_cover, "_category_stats_by_species_8categories.txt"))
 sink(stats_file_species_8cat)
 
 cat("\n##################################################\n")
@@ -287,8 +299,8 @@ cat("# PART 2: All 8 SDM categories (0-7) — per species\n")
 cat("#   Response: CH_no_habitat (Residual)\n")
 cat("##################################################\n")
 
-for (sp in species_list) {
-  sp_name <- unique(all_sdm$species[all_sdm$species_code == sp])
+for (sp in target_species_list) {
+  sp_name <- unique(target_sdm$species[target_sdm$species_code == sp])
 
   cat("\n==========================================================\n")
   cat(" ", sp_name, " (", sp, ")\n")
@@ -310,39 +322,33 @@ sink()
 cat("Saved Part 2 (per-species 8-category) statistics to:",
     stats_file_species_8cat, "\n")
 
-for (sp in species_list) {
-  sp_name <- unique(all_sdm$species[all_sdm$species_code == sp])
+for (sp in target_species_list) {
+  sp_name <- unique(target_sdm$species[target_sdm$species_code == sp])
   sp_45 <- analysis_45 %>% filter(species_code == sp)
   sp_85 <- analysis_85 %>% filter(species_code == sp)
 
   make_violin_cld(
     sp_45, sp_85,
     group = "category", group_levels = cat8_levels,
-    title = paste0(sp_name, " (", sp, ")"),
+    title = paste0(sp_name, " (", sp, ") (group:", land_cover, ")"),
     subtitle = paste0("n = ", nrow(sp_45), " (RCP4.5), ",
                       nrow(sp_85), " (RCP8.5) route observations"),
     x_lab = "SDM classified change category",
-    file_name = paste0(sp, "_CH_no_habitat_by_rcp_cld.png"),
-    angle_x = TRUE
+    file_name = paste0(land_cover, "_", sp, "_CH_no_habitat_by_rcp_cld.png"),
+    dir = per_species_dir
   )
 }
 
 
 # ==========================================================================
-# PART 3: Grouped categories already created above
-#   (analysis_45_grp / analysis_85_grp; change_group factor)
+# PART 3: Grouped categories (Contraction/Stable/Expansion) — all species ####
 # ==========================================================================
 
-
-# ==========================================================================
-# PART 4: Grouped categories (Contraction/Stable/Expansion) — all species ####
-# ==========================================================================
-
-stats_file_grp <- file.path(stats_dir, "category_stats_grouped.txt")
+stats_file_grp <- file.path(stats_dir, paste0(land_cover, "_category_stats_grouped.txt"))
 sink(stats_file_grp)
 
 cat("\n##################################################\n")
-cat("# PART 4: Grouped categories — all species\n")
+cat("# PART 3: Grouped categories — all species\n")
 cat("#   Contraction = 1,2,3 | Stable = 4 | Expansion = 5,6,7\n")
 cat("#   (category 0 = never suitable, excluded)\n")
 cat("#   Response: CH_no_habitat (Residual)\n")
@@ -352,36 +358,36 @@ run_category_tests(analysis_45_grp, "CH_no_habitat", "change_group", "RCP 4.5", 
 run_category_tests(analysis_85_grp, "CH_no_habitat", "change_group", "RCP 8.5", "Residual")
 
 sink()
-cat("Saved Part 4 (all-species grouped) statistics to:", stats_file_grp, "\n")
+cat("Saved Part 3 (all-species grouped) statistics to:", stats_file_grp, "\n")
 
 make_violin_cld(
   analysis_45_grp, analysis_85_grp,
   group = "change_group", group_levels = grp_levels,
-  title = "All grassland species combined",
-  subtitle = paste0(nrow(all_sdm), " route-species observations across ",
-                    length(unique(all_sdm$route)), " unique routes and ",
-                    length(unique(all_sdm$species_code)), " species"),
+  title = paste0("All ", land_cover, " species combined"),
+  subtitle = paste0(nrow(target_sdm), " route-species observations across ",
+                    length(unique(target_sdm$route)), " unique routes and ",
+                    length(unique(target_sdm$species_code)), " species"),
   x_lab = "Range change group",
-  file_name = "ALL_species_CH_no_habitat_by_group_cld.png"
+  file_name = paste0(land_cover, "_ALL_species_CH_no_habitat_by_group_cld.png")
 )
 
 
 # ==========================================================================
-# PART 5: Grouped categories (Contraction/Stable/Expansion) — per species ####
+# PART 4: Grouped categories (Contraction/Stable/Expansion) — per species ####
 # ==========================================================================
 
 stats_file_species_grp <- file.path(stats_dir,
-                                     "category_stats_by_species_grouped.txt")
+                                     paste0(land_cover, "_category_stats_by_species_grouped.txt"))
 sink(stats_file_species_grp)
 
 cat("\n##################################################\n")
-cat("# PART 5: Grouped categories — per species\n")
+cat("# PART 4: Grouped categories — per species\n")
 cat("#   Contraction = 1,2,3 | Stable = 4 | Expansion = 5,6,7\n")
 cat("#   Response: CH_no_habitat (Residual)\n")
 cat("##################################################\n")
 
-for (sp in species_list) {
-  sp_name <- unique(all_sdm$species[all_sdm$species_code == sp])
+for (sp in target_species_list) {
+  sp_name <- unique(target_sdm$species[target_sdm$species_code == sp])
 
   cat("\n==========================================================\n")
   cat(" ", sp_name, " (", sp, ")\n")
@@ -400,22 +406,136 @@ for (sp in species_list) {
 }
 
 sink()
-cat("Saved Part 5 (per-species grouped) statistics to:",
+cat("Saved Part 4 (per-species grouped) statistics to:",
     stats_file_species_grp, "\n")
 
-for (sp in species_list) {
-  sp_name <- unique(all_sdm$species[all_sdm$species_code == sp])
+for (sp in target_species_list) {
+  sp_name <- unique(target_sdm$species[target_sdm$species_code == sp])
   sp_45 <- analysis_45_grp %>% filter(species_code == sp)
   sp_85 <- analysis_85_grp %>% filter(species_code == sp)
 
   make_violin_cld(
     sp_45, sp_85,
     group = "change_group", group_levels = grp_levels,
-    title = paste0(sp_name, " (", sp, ")"),
+    title = paste0(sp_name, " (", sp, ") (group:", land_cover, ")"),
     subtitle = paste0("n = ", nrow(sp_45), " (RCP4.5), ",
                       nrow(sp_85), " (RCP8.5) route observations"),
     x_lab = "Range change group",
-    file_name = paste0(sp, "_CH_no_habitat_by_group_cld.png")
+    file_name = paste0(land_cover, "_", sp, "_CH_no_habitat_by_group_cld.png"),
+    dir = per_species_dir
+  )
+}
+
+
+# ==========================================================================
+# PART 5: ALL land covers combined (ignore land_cover filter) ####
+#   Pools every <land_cover>_<species>_route_CH_sdm.csv in out_dir, e.g.
+#   grasslands_* and aridlands_*, into one dataset for the all-species
+#   8-category and grouped analyses + plots.
+# ==========================================================================
+
+cat("\nCombining all species SDM files across ALL land covers...\n")
+
+# All SDM CSVs, regardless of the land-cover prefix.
+sdm_files_all <- list.files(out_dir,
+                            pattern = "_route_CH_sdm\\.csv$",
+                            full.names = TRUE)
+
+if (length(sdm_files_all) == 0) {
+  warning("No SDM CSVs found in ", out_dir, " for the all-land-cover analysis.")
+} else {
+  # Tag each row with its land cover (the prefix before the first underscore)
+  # so the combined dataset records which land covers were pooled.
+  all_sdm <- sdm_files_all %>%
+    map_dfr(function(f) {
+      lc <- sub("_.*$", "", basename(f))
+      read.csv(f) %>% mutate(land_cover = lc)
+    })
+
+  land_covers_used <- sort(unique(all_sdm$land_cover))
+  cat("Land covers:", paste(land_covers_used, collapse = ", "), "\n")
+  cat("Total rows:", nrow(all_sdm), "\n")
+  cat("Species:", length(unique(all_sdm$species_code)), "\n")
+
+  # Build combined analysis data (mirrors the per-land-cover setup above).
+  analysis_45_all <- all_sdm %>%
+    filter(!is.na(rcp45)) %>%
+    transmute(route, species_code, category = rcp45, CH_no_habitat,
+              route_num = as.integer(sub("^\\d+-", "", route)))
+
+  analysis_85_all <- all_sdm %>%
+    filter(!is.na(rcp85)) %>%
+    transmute(route, species_code, category = rcp85, CH_no_habitat,
+              route_num = as.integer(sub("^\\d+-", "", route)))
+
+  analysis_45_all_grp <- analysis_45_all %>%
+    mutate(change_group = factor(group_category(category),
+                                 levels = c("Contraction", "Stable", "Expansion")))
+
+  analysis_85_all_grp <- analysis_85_all %>%
+    mutate(change_group = factor(group_category(category),
+                                 levels = c("Contraction", "Stable", "Expansion")))
+
+  lc_tag <- "all_lc"
+
+  # ----- 8 SDM categories (0-7) — all species, all land covers -----
+  stats_file_all_8cat <- file.path(stats_dir,
+                                    paste0(lc_tag, "_category_stats_8categories.txt"))
+  sink(stats_file_all_8cat)
+
+  cat("\n##################################################\n")
+  cat("# PART 5: All 8 SDM categories (0-7) — all species, ALL land covers\n")
+  cat("#   Land covers pooled:", paste(land_covers_used, collapse = ", "), "\n")
+  cat("#   Response: CH_no_habitat (Residual)\n")
+  cat("##################################################\n")
+
+  run_category_tests(analysis_45_all, "CH_no_habitat", "category", "RCP 4.5", "Residual")
+  run_category_tests(analysis_85_all, "CH_no_habitat", "category", "RCP 8.5", "Residual")
+
+  sink()
+  cat("Saved Part 5 (all-land-cover 8-category) statistics to:", stats_file_all_8cat, "\n")
+
+  make_violin_cld(
+    analysis_45_all, analysis_85_all,
+    group = "category", group_levels = cat8_levels,
+    title = "All species combined — all land covers",
+    subtitle = paste0(nrow(all_sdm), " route-species observations across ",
+                      length(unique(all_sdm$route)), " unique routes, ",
+                      length(unique(all_sdm$species_code)), " species, and ",
+                      length(land_covers_used), " land covers"),
+    x_lab = "SDM classified change category",
+    file_name = paste0(lc_tag, "_ALL_species_CH_no_habitat_by_rcp_cld.png")
+  )
+
+  # ----- Grouped categories — all species, all land covers -----
+  stats_file_all_grp <- file.path(stats_dir,
+                                   paste0(lc_tag, "_category_stats_grouped.txt"))
+  sink(stats_file_all_grp)
+
+  cat("\n##################################################\n")
+  cat("# PART 5: Grouped categories — all species, ALL land covers\n")
+  cat("#   Contraction = 1,2,3 | Stable = 4 | Expansion = 5,6,7\n")
+  cat("#   (category 0 = never suitable, excluded)\n")
+  cat("#   Land covers pooled:", paste(land_covers_used, collapse = ", "), "\n")
+  cat("#   Response: CH_no_habitat (Residual)\n")
+  cat("##################################################\n")
+
+  run_category_tests(analysis_45_all_grp, "CH_no_habitat", "change_group", "RCP 4.5", "Residual")
+  run_category_tests(analysis_85_all_grp, "CH_no_habitat", "change_group", "RCP 8.5", "Residual")
+
+  sink()
+  cat("Saved Part 5 (all-land-cover grouped) statistics to:", stats_file_all_grp, "\n")
+
+  make_violin_cld(
+    analysis_45_all_grp, analysis_85_all_grp,
+    group = "change_group", group_levels = grp_levels,
+    title = "All species combined — all land covers",
+    subtitle = paste0(nrow(all_sdm), " route-species observations across ",
+                      length(unique(all_sdm$route)), " unique routes, ",
+                      length(unique(all_sdm$species_code)), " species, and ",
+                      length(land_covers_used), " land covers"),
+    x_lab = "Range change group",
+    file_name = paste0(lc_tag, "_ALL_species_CH_no_habitat_by_group_cld.png")
   )
 }
 
