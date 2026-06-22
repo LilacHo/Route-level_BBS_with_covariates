@@ -53,4 +53,6 @@ rsconnect/
 data/**/*.tif
 data/maps/*.pdf
 data/stan_data/*.RData
-output/
+output/*.rds
+output/**/*.csv
+output/**/*.png
