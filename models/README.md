@@ -1,8 +1,8 @@
 # Route-level trend models: mathematical specification
 
 This document gives the exact mathematical formulation of the route-level
-observation models used in `code/1_CH_no_habitat_routes.R`, and shows how the
-route-level cumulative habitat-independent change, $CH^{\text{no\_habitat}}_r$,
+observation models used in `code/4_scenario_fit.R`, and shows how the
+route-level cumulative habitat-independent change, <i>CH</i><sup>no_habitat</sup><sub>r</sub>,
 is computed for each model so that the metric is **comparable across species**
 even when different species are fit with different observation processes.
 
@@ -18,7 +18,7 @@ the project `methods_section.md`. The Stan model files are:
 
 `ZINB_test` is the simplest zero-inflation variant (one global structural-zero
 probability). It is not assigned by the main pipeline
-(`code/1_CH_no_habitat_routes.R`); it is retained as a model-selection candidate
+(`code/4_scenario_fit.R`); it is retained as a model-selection candidate
 in `code/test_convergence_refit_strategy.R` and as the conceptual predecessor of
 the route-varying models. It is documented here for completeness.
 
@@ -27,50 +27,46 @@ the route-varying models. It is documented here for completeness.
 ## 1. Shared abundance process
 
 All models share an **identical abundance (mean-count) process**. Only the
-likelihood differs (how zeros are handled). For survey event $i$ with route
-$r[i]$, year $t_i$, observer $o[i]$, and first-year indicator
-$I_i^{\text{first}}$, the log expected count is
+likelihood differs (how zeros are handled). For survey event <i>i</i> with route
+<i>r</i>[<i>i</i>], year <i>t<sub>i</sub></i>, observer <i>o</i>[<i>i</i>], and first-year indicator
+<i>I<sub>i</sub></i><sup>first</sup>, the log expected count is
 
-$$
-\log(\lambda_i)
-= \alpha_{r[i]}
-+ \beta_{r[i]}\,(t_i - t_0)
-+ \omega_{o[i]}
-+ \eta\,I_i^{\text{first}},
-$$
+<p align="center">
+log(&lambda;<sub>i</sub>) = &alpha;<sub>r[i]</sub> + &beta;<sub>r[i]</sub> (<i>t<sub>i</sub></i> &minus; <i>t</i><sub>0</sub>) + &omega;<sub>o[i]</sub> + &eta; <i>I<sub>i</sub></i><sup>first</sup> ,
+</p>
 
-where $t_0$ is the median (fixed) year of the series. In the Stan code
-$\log(\lambda_i)$ is the vector `E`, $\phi$ (`phi`) is the NB dispersion
-parameterized as $\phi = 1/\sqrt{\sigma_{\text{noise}}}$, $\omega_o$ (`obs`) is
-the observer random effect, and $\eta$ (`eta`) is the first-year start-up
+where <i>t</i><sub>0</sub> is the median (fixed) year of the series. In the Stan code
+log(&lambda;<sub>i</sub>) is the vector `E`, &phi; (`phi`) is the NB dispersion
+parameterized as &phi; = 1/&radic;&sigma;<sub>noise</sub>, &omega;<sub>o</sub> (`obs`) is
+the observer random effect, and &eta; (`eta`) is the first-year start-up
 effect.
 
 ### Habitat decomposition of the route intercept and slope
 
-Both the route intercept $\alpha_r$ and route slope $\beta_r$ are decomposed
+Both the route intercept &alpha;<sub>r</sub> and route slope &beta;<sub>r</sub> are decomposed
 into a habitat component and a residual component:
 
-$$
-\alpha_r = \alpha_r^{\text{resid}} + \rho^{\alpha}_r\,h_r,
-\qquad
-\beta_r  = \beta_r^{\text{resid}}  + \rho^{\beta}_r\,\dot{h}_r,
-$$
+<p align="center">
+&alpha;<sub>r</sub> = &alpha;<sub>r</sub><sup>resid</sup> + &rho;<sup>&alpha;</sup><sub>r</sub> <i>h<sub>r</sub></i> ,
+&nbsp;&nbsp;&nbsp;
+&beta;<sub>r</sub> = &beta;<sub>r</sub><sup>resid</sup> + &rho;<sup>&beta;</sup><sub>r</sub> <i>ḣ<sub>r</sub></i> ,
+</p>
 
 where
 
-- $h_r$ = centered/standardized mean land-cover suitability on route $r$
+- <i>h<sub>r</sub></i> = centered/standardized mean land-cover suitability on route <i>r</i>
   (`route_habitat`),
-- $\dot{h}_r$ = centered/standardized route-level rate of change in suitability
+- <i>ḣ<sub>r</sub></i> = centered/standardized route-level rate of change in suitability
   (`route_habitat_slope`), estimated as the slope of a linear regression of
   annual suitability on year,
-- $\rho^{\alpha}_r,\ \rho^{\beta}_r$ = route-varying habitat coefficients.
+- &rho;<sup>&alpha;</sup><sub>r</sub>, &rho;<sup>&beta;</sup><sub>r</sub> = route-varying habitat coefficients.
 
 In the Stan code:
 
-- `beta_resid` $= \beta_r^{\text{resid}}$, `beta` $= \beta_r$,
-- `alpha_resid` $= \alpha_r^{\text{resid}}$, `alpha` $= \alpha_r$.
+- `beta_resid` = &beta;<sub>r</sub><sup>resid</sup>, `beta` = &beta;<sub>r</sub>,
+- `alpha_resid` = &alpha;<sub>r</sub><sup>resid</sup>, `alpha` = &alpha;<sub>r</sub>.
 
-The residual slope $\beta_r^{\text{resid}}$ is the route-level trend **net of the
+The residual slope &beta;<sub>r</sub><sup>resid</sup> is the route-level trend **net of the
 land-cover-change component**. Residual slopes (and residual intercepts in the
 spatial configuration) receive an intrinsic Conditional Autoregressive (iCAR)
 prior over the route Voronoi adjacency graph.
@@ -81,211 +77,195 @@ prior over the route Voronoi adjacency graph.
 
 ### 2.1 Negative binomial — `NB_test`
 
-$$
-C_i \sim \text{NegBinomial}(\lambda_i, \phi).
-$$
+<p align="center">
+<i>C<sub>i</sub></i> &sim; NegBinomial(&lambda;<sub>i</sub>, &phi;) .
+</p>
 
 Every count is generated by the negative binomial. There is no structural-zero
 component, so the marginal (expected observed) mean equals the NB mean,
-$\mathbb{E}[C_i] = \lambda_i$.
+E[<i>C<sub>i</sub></i>] = &lambda;<sub>i</sub>.
 
 ### 2.2 Zero-inflated NB, single global inflation — `ZINB_test`
 
 A structural-zero component with a **single global**, time-invariant
-probability $\psi$ (shared by every route and observation) is mixed with the NB:
+probability &psi; (shared by every route and observation) is mixed with the NB:
 
-$$
-C_i \sim
-\begin{cases}
-0 & \text{with probability } \psi, \\[4pt]
-\text{NegBinomial}(\lambda_i, \phi) & \text{with probability } 1 - \psi,
-\end{cases}
-$$
+<p align="center">
+<i>C<sub>i</sub></i> = 0 with probability &psi;,&nbsp; otherwise&nbsp; NegBinomial(&lambda;<sub>i</sub>, &phi;) with probability 1 &minus; &psi; ,
+</p>
 
-$$
-\text{logit}(\psi) = \psi_0,
-$$
+<p align="center">
+logit(&psi;) = &psi;<sub>0</sub> ,
+</p>
 
-where $\psi_0$ (`zi_logit`) is the global structural-zero logit and
-$\psi$ (`zi`) $= \text{logit}^{-1}(\psi_0)$ is a scalar. The mixture pmf is the
+where &psi;<sub>0</sub> (`zi_logit`) is the global structural-zero logit and
+&psi; (`zi`) = logit<sup>&minus;1</sup>(&psi;<sub>0</sub>) is a scalar. The mixture pmf is the
 same `zinb2_log_lpmf` used by the other ZINB models. The marginal mean is
-$\mathbb{E}[C_i] = (1 - \psi)\,\lambda_i$, with $(1-\psi)$ constant over time and
+E[<i>C<sub>i</sub></i>] = (1 &minus; &psi;) &lambda;<sub>i</sub>, with (1&minus;&psi;) constant over time and
 across routes.
 
 ### 2.3 Zero-inflated NB, route-varying — `ZINB_route_test`
 
 A structural-zero component with a **route-specific**, time-invariant
-probability $\psi_r$ is mixed with the NB:
+probability &psi;<sub>r</sub> is mixed with the NB:
 
-$$
-C_i \sim
-\begin{cases}
-0 & \text{with probability } \psi_{r[i]}, \\[4pt]
-\text{NegBinomial}(\lambda_i, \phi) & \text{with probability } 1 - \psi_{r[i]},
-\end{cases}
-$$
+<p align="center">
+<i>C<sub>i</sub></i> = 0 with probability &psi;<sub>r[i]</sub>,&nbsp; otherwise&nbsp; NegBinomial(&lambda;<sub>i</sub>, &phi;) with probability 1 &minus; &psi;<sub>r[i]</sub> ,
+</p>
 
-$$
-\text{logit}(\psi_r) = \psi_0 + \sigma_{\psi}\,\tilde{\psi}_r,
-$$
+<p align="center">
+logit(&psi;<sub>r</sub>) = &psi;<sub>0</sub> + &sigma;<sub>&psi;</sub> &psi;&#771;<sub>r</sub> ,
+</p>
 
-where $\psi_0$ (`zi_intercept`) is the global structural-zero logit,
-$\tilde{\psi}_r$ (`zi_route_raw`) is a route random effect, and
-$\sigma_{\psi}$ (`sd_zi_route`) its standard deviation. In the Stan code
-$\psi_r$ is `zi_route`.
+where &psi;<sub>0</sub> (`zi_intercept`) is the global structural-zero logit,
+&psi;&#771;<sub>r</sub> (`zi_route_raw`) is a route random effect, and
+&sigma;<sub>&psi;</sub> (`sd_zi_route`) its standard deviation. In the Stan code
+&psi;<sub>r</sub> is `zi_route`.
 
 The probability mass function of the mixture (`zinb2_log_lpmf`) is
 
-$$
-p(C_i = y) =
-\begin{cases}
-\psi_{r[i]} + (1-\psi_{r[i]})\,\text{NB}(0 \mid \lambda_i, \phi) & y = 0, \\[4pt]
-(1-\psi_{r[i]})\,\text{NB}(y \mid \lambda_i, \phi) & y > 0.
-\end{cases}
-$$
+<p align="center">
+<i>p</i>(<i>C<sub>i</sub></i> = <i>y</i>) = &psi;<sub>r[i]</sub> + (1&minus;&psi;<sub>r[i]</sub>) NB(0 &vert; &lambda;<sub>i</sub>, &phi;) &nbsp; for <i>y</i> = 0,
+</p>
+<p align="center">
+<i>p</i>(<i>C<sub>i</sub></i> = <i>y</i>) = (1&minus;&psi;<sub>r[i]</sub>) NB(<i>y</i> &vert; &lambda;<sub>i</sub>, &phi;) &nbsp; for <i>y</i> &gt; 0.
+</p>
 
 The marginal (expected observed) mean is
-$\mathbb{E}[C_i] = (1 - \psi_{r[i]})\,\lambda_i$. Because $\psi_r$ does not
-depend on year, the $(1-\psi_r)$ factor is constant over time on a given route.
+E[<i>C<sub>i</sub></i>] = (1 &minus; &psi;<sub>r[i]</sub>) &lambda;<sub>i</sub>. Because &psi;<sub>r</sub> does not
+depend on year, the (1&minus;&psi;<sub>r</sub>) factor is constant over time on a given route.
 
 ### 2.4 Zero-inflated NB, route- and abundance-varying — `ZINB_route_mu_test`
 
 The structural-zero probability additionally depends on the expected log
-abundance $\log(\lambda_i)$, so it is **observation-specific** and therefore
+abundance log(&lambda;<sub>i</sub>), so it is **observation-specific** and therefore
 **time-varying**:
 
-$$
-C_i \sim
-\begin{cases}
-0 & \text{with probability } \psi_i, \\[4pt]
-\text{NegBinomial}(\lambda_i, \phi) & \text{with probability } 1 - \psi_i,
-\end{cases}
-$$
+<p align="center">
+<i>C<sub>i</sub></i> = 0 with probability &psi;<sub>i</sub>,&nbsp; otherwise&nbsp; NegBinomial(&lambda;<sub>i</sub>, &phi;) with probability 1 &minus; &psi;<sub>i</sub> ,
+</p>
 
-$$
-\text{logit}(\psi_i) = \psi_0 + \sigma_{\psi}\,\tilde{\psi}_{r[i]}
-+ \gamma\,\log(\lambda_i),
-$$
+<p align="center">
+logit(&psi;<sub>i</sub>) = &psi;<sub>0</sub> + &sigma;<sub>&psi;</sub> &psi;&#771;<sub>r[i]</sub> + &gamma; log(&lambda;<sub>i</sub>) ,
+</p>
 
-where $\gamma$ (`zi_log_mu`) links the structural-zero logit to expected log
-abundance; a negative $\gamma$ means low-abundance observations are more likely
-to be structural zeros. In the Stan code $\psi_i$ is `zi_obs`. The marginal mean
-is $\mathbb{E}[C_i] = (1 - \psi_i)\,\lambda_i$, and because $\psi_i$ depends on
-$\log(\lambda_i)$, which changes with year through $\beta_r$, the $(1 - \psi_i)$
+where &gamma; (`zi_log_mu`) links the structural-zero logit to expected log
+abundance; a negative &gamma; means low-abundance observations are more likely
+to be structural zeros. In the Stan code &psi;<sub>i</sub> is `zi_obs`. The marginal mean
+is E[<i>C<sub>i</sub></i>] = (1 &minus; &psi;<sub>i</sub>) &lambda;<sub>i</sub>, and because &psi;<sub>i</sub> depends on
+log(&lambda;<sub>i</sub>), which changes with year through &beta;<sub>r</sub>, the (1 &minus; &psi;<sub>i</sub>)
 factor is **not** constant over time.
 
 ---
 
-## 3. Cumulative change and the $CH^{\text{no\_habitat}}$ metric
+## 3. Cumulative change and the <i>CH</i><sup>no_habitat</sup> metric
 
 For every model we define per-route trend metrics from the **expected observed
-count** (the marginal mean $m_{r,y}$), evaluated at the first and last year of
+count** (the marginal mean <i>m<sub>r,y</sub></i>), evaluated at the first and last year of
 the series. Using a single consistent estimand — the trend in the marginal mean
-— is what makes $CH^{\text{no\_habitat}}_r$ comparable across species regardless
+— is what makes <i>CH</i><sup>no_habitat</sup><sub>r</sub> comparable across species regardless
 of which observation model was used.
 
-Let $y = 1$ denote the first year and $y = Y$ the last year (with $Y - 1 = dt$
-years elapsed), and let $\lambda_{r,y}$ be the route-level expected count with
+Let <i>y</i> = 1 denote the first year and <i>y</i> = <i>Y</i> the last year (with <i>Y</i> &minus; 1 = <i>dt</i>
+years elapsed), and let &lambda;<sub>r,y</sub> be the route-level expected count with
 the observer and first-year nuisance terms omitted:
 
-$$
-\log(\lambda_{r,y}) = \alpha_r + \beta_r\,(y - t_0)
-\qquad\text{(full slope)},
-$$
+<p align="center">
+log(&lambda;<sub>r,y</sub>) = &alpha;<sub>r</sub> + &beta;<sub>r</sub> (<i>y</i> &minus; <i>t</i><sub>0</sub>) &nbsp; (full slope),
+</p>
 
-$$
-\log(\lambda_{r,y}^{\text{resid}}) = \alpha_r + \beta_r^{\text{resid}}\,(y - t_0)
-\qquad\text{(residual / habitat-independent slope)}.
-$$
+<p align="center">
+log(&lambda;<sub>r,y</sub><sup>resid</sup>) = &alpha;<sub>r</sub> + &beta;<sub>r</sub><sup>resid</sup> (<i>y</i> &minus; <i>t</i><sub>0</sub>) &nbsp; (residual / habitat-independent slope).
+</p>
 
-### 3.1 Marginal mean $m_{r,y}$ by model
+### 3.1 Marginal mean <i>m<sub>r,y</sub></i> by model
 
 The marginal mean folds in the structural-zero component appropriate to each
-model. Writing $m_{r,y}$ for the full-slope marginal mean and
-$m_{r,y}^{\text{resid}}$ for the residual-slope marginal mean:
+model. Writing <i>m<sub>r,y</sub></i> for the full-slope marginal mean and
+<i>m<sub>r,y</sub></i><sup>resid</sup> for the residual-slope marginal mean:
 
 **`NB_test`** (no structural zeros):
 
-$$
-m_{r,y} = \lambda_{r,y},
-\qquad
-m_{r,y}^{\text{resid}} = \lambda_{r,y}^{\text{resid}}.
-$$
+<p align="center">
+<i>m<sub>r,y</sub></i> = &lambda;<sub>r,y</sub> ,
+&nbsp;&nbsp;&nbsp;
+<i>m<sub>r,y</sub></i><sup>resid</sup> = &lambda;<sub>r,y</sub><sup>resid</sup> .
+</p>
 
-**`ZINB_test`** (single global, time-invariant $\psi$):
+**`ZINB_test`** (single global, time-invariant &psi;):
 
-$$
-m_{r,y} = (1 - \psi)\,\lambda_{r,y},
-\qquad
-m_{r,y}^{\text{resid}} = (1 - \psi)\,\lambda_{r,y}^{\text{resid}}.
-$$
+<p align="center">
+<i>m<sub>r,y</sub></i> = (1 &minus; &psi;) &lambda;<sub>r,y</sub> ,
+&nbsp;&nbsp;&nbsp;
+<i>m<sub>r,y</sub></i><sup>resid</sup> = (1 &minus; &psi;) &lambda;<sub>r,y</sub><sup>resid</sup> .
+</p>
 
-The scalar $(1 - \psi)$ factor cancels in the ratio, so the value equals the
+The scalar (1 &minus; &psi;) factor cancels in the ratio, so the value equals the
 NB-mean trend; it is kept explicit for a consistent definition.
 
-**`ZINB_route_test`** (route-varying, time-invariant $\psi_r$):
+**`ZINB_route_test`** (route-varying, time-invariant &psi;<sub>r</sub>):
 
-$$
-m_{r,y} = (1 - \psi_r)\,\lambda_{r,y},
-\qquad
-m_{r,y}^{\text{resid}} = (1 - \psi_r)\,\lambda_{r,y}^{\text{resid}}.
-$$
+<p align="center">
+<i>m<sub>r,y</sub></i> = (1 &minus; &psi;<sub>r</sub>) &lambda;<sub>r,y</sub> ,
+&nbsp;&nbsp;&nbsp;
+<i>m<sub>r,y</sub></i><sup>resid</sup> = (1 &minus; &psi;<sub>r</sub>) &lambda;<sub>r,y</sub><sup>resid</sup> .
+</p>
 
-The $(1 - \psi_r)$ factor cancels in the ratio below, so the value equals the
+The (1 &minus; &psi;<sub>r</sub>) factor cancels in the ratio below, so the value equals the
 NB-mean trend; it is kept explicit for a consistent definition.
 
-**`ZINB_route_mu_test`** (route- and abundance-varying $\psi$; time-varying).
+**`ZINB_route_mu_test`** (route- and abundance-varying &psi;; time-varying).
 The structural-zero probability is reconstructed at each year from the same
 abundance predictor used for the change metric:
 
-$$
-\psi_{r,y} = \text{logit}^{-1}\!\big(\psi_0 + \sigma_{\psi}\,\tilde{\psi}_r
-+ \gamma\,\log(\lambda_{r,y})\big),
-\qquad
-\psi_{r,y}^{\text{resid}} = \text{logit}^{-1}\!\big(\psi_0 + \sigma_{\psi}\,\tilde{\psi}_r
-+ \gamma\,\log(\lambda_{r,y}^{\text{resid}})\big),
-$$
+<p align="center">
+&psi;<sub>r,y</sub> = logit<sup>&minus;1</sup>(&psi;<sub>0</sub> + &sigma;<sub>&psi;</sub> &psi;&#771;<sub>r</sub> + &gamma; log(&lambda;<sub>r,y</sub>)) ,
+</p>
 
-$$
-m_{r,y} = (1 - \psi_{r,y})\,\lambda_{r,y},
-\qquad
-m_{r,y}^{\text{resid}} = (1 - \psi_{r,y}^{\text{resid}})\,\lambda_{r,y}^{\text{resid}}.
-$$
+<p align="center">
+&psi;<sub>r,y</sub><sup>resid</sup> = logit<sup>&minus;1</sup>(&psi;<sub>0</sub> + &sigma;<sub>&psi;</sub> &psi;&#771;<sub>r</sub> + &gamma; log(&lambda;<sub>r,y</sub><sup>resid</sup>)) ,
+</p>
 
-Here the $(1 - \psi)$ factor does **not** cancel, because $\psi_{r,y}$ changes
+<p align="center">
+<i>m<sub>r,y</sub></i> = (1 &minus; &psi;<sub>r,y</sub>) &lambda;<sub>r,y</sub> ,
+&nbsp;&nbsp;&nbsp;
+<i>m<sub>r,y</sub></i><sup>resid</sup> = (1 &minus; &psi;<sub>r,y</sub><sup>resid</sup>) &lambda;<sub>r,y</sub><sup>resid</sup> .
+</p>
+
+Here the (1 &minus; &psi;) factor does **not** cancel, because &psi;<sub>r,y</sub> changes
 with year; the time-varying zero inflation is correctly folded into the trend.
 
 ### 3.2 Cumulative change formulas
 
-For every model, using the appropriate $m_{r,y}$ from Section 3.1:
+For every model, using the appropriate <i>m<sub>r,y</sub></i> from Section 3.1:
 
-$$
-CH_r = 100\left(\frac{m_{r,Y}}{m_{r,1}} - 1\right),
-$$
+<p align="center">
+<i>CH<sub>r</sub></i> = 100 (<i>m<sub>r,Y</sub></i> / <i>m<sub>r,1</sub></i> &minus; 1) ,
+</p>
 
-$$
-CH^{\text{no\_habitat}}_r = 100\left(\frac{m_{r,Y}^{\text{resid}}}{m_{r,1}^{\text{resid}}} - 1\right),
-$$
+<p align="center">
+<i>CH</i><sup>no_habitat</sup><sub>r</sub> = 100 (<i>m<sub>r,Y</sub></i><sup>resid</sup> / <i>m<sub>r,1</sub></i><sup>resid</sup> &minus; 1) ,
+</p>
 
-$$
-CH^{\text{dif}}_r = CH_r - CH^{\text{no\_habitat}}_r.
-$$
+<p align="center">
+<i>CH</i><sup>dif</sup><sub>r</sub> = <i>CH<sub>r</sub></i> &minus; <i>CH</i><sup>no_habitat</sup><sub>r</sub> .
+</p>
 
-- $CH_r$ is the realized route-level cumulative percent change in expected
+- <i>CH<sub>r</sub></i> is the realized route-level cumulative percent change in expected
   observed count.
-- $CH^{\text{no\_habitat}}_r$ is the cumulative percent change **after removing
+- <i>CH</i><sup>no_habitat</sup><sub>r</sub> is the cumulative percent change **after removing
   the land-cover-change component** (it uses the residual slope
-  $\beta_r^{\text{resid}}$). This is the quantity carried forward as the response
+  &beta;<sub>r</sub><sup>resid</sup>). This is the quantity carried forward as the response
   in the downstream range-shift analyses.
-- $CH^{\text{dif}}_r$ isolates the portion of the trend attributable to
+- <i>CH</i><sup>dif</sup><sub>r</sub> isolates the portion of the trend attributable to
   land-cover change.
 
-An annualized version ($T_r$, $T_r^{\text{no\_habitat}}$, $T_r^{\text{dif}}$) is
-also produced by replacing the ratio with its $1/Y$ power:
+An annualized version (<i>T<sub>r</sub></i>, <i>T<sub>r</sub></i><sup>no_habitat</sup>, <i>T<sub>r</sub></i><sup>dif</sup>) is
+also produced by replacing the ratio with its 1/<i>Y</i> power:
 
-$$
-T_r = 100\left(\left(\frac{m_{r,Y}}{m_{r,1}}\right)^{1/Y} - 1\right).
-$$
+<p align="center">
+<i>T<sub>r</sub></i> = 100 ((<i>m<sub>r,Y</sub></i> / <i>m<sub>r,1</sub></i>)<sup>1/Y</sup> &minus; 1) .
+</p>
 
 ### 3.3 Where this is computed
 
@@ -295,40 +275,114 @@ every posterior draw**, and exported as:
 - scalars `CH`, `CH_no_habitat`, `CH_dif` (route-averaged), and
 - per-route vectors `CH_route`, `CH_no_habitat_route`, `CH_dif_route`.
 
-`code/1_CH_no_habitat_routes.R` reads the per-route vectors directly (function
+`code/4_scenario_fit.R` reads the per-route vectors directly (function
 `route_summary_from_fit`), so the reported values are posterior means of the
 nonlinear change metric rather than the change metric evaluated at a
-posterior-mean slope. Computing $CH$ per draw also propagates posterior
+posterior-mean slope. Computing <i>CH</i> per draw also propagates posterior
 uncertainty correctly and yields the same estimand across all models.
 
 > **Note.** Because the metric is now emitted by the Stan models, species must
 > be **refit** (set `refit_existing_models <- TRUE` or delete stale fit files)
 > to obtain `CH_route`. Fits saved before this change fall back to a
-> $\beta$-based approximation on the NB-mean scale and emit a warning.
+> &beta;-based approximation on the NB-mean scale and emit a warning.
 
 ---
 
-## 4. Why $CH^{\text{no\_habitat}}$ is comparable across species
+## 4. Why <i>CH</i><sup>no_habitat</sup> is comparable across species
 
 Different species may be fit with different observation models (chosen from
-baseline diagnostics; see `code/1a_prepare_model_scenarios.R`). Comparability
+baseline diagnostics; see `code/3_assign_model_scenarios.R`). Comparability
 holds because:
 
-1. **The abundance process is identical** across models. $\beta_r^{\text{resid}}$
+1. **The abundance process is identical** across models. &beta;<sub>r</sub><sup>resid</sup>
    always denotes the route-level trend in the NB conditional mean, net of the
    habitat-change effect.
-2. **$CH^{\text{no\_habitat}}$ is a dimensionless percent change.** The absolute
-   abundance level of a species cancels in the ratio $m_{r,Y}^{\text{resid}} /
-   m_{r,1}^{\text{resid}}$, so species at very different densities are on the
+2. **<i>CH</i><sup>no_habitat</sup> is a dimensionless percent change.** The absolute
+   abundance level of a species cancels in the ratio <i>m<sub>r,Y</sub></i><sup>resid</sup> /
+   <i>m<sub>r,1</sub></i><sup>resid</sup>, so species at very different densities are on the
    same scale.
 3. **All models report the same estimand** — the trend in the marginal
-   (expected observed) mean $m_{r,y}$ — because the zero-inflation component is
-   explicitly included in $m_{r,y}$ for the ZINB models, including the
+   (expected observed) mean <i>m<sub>r,y</sub></i> — because the zero-inflation component is
+   explicitly included in <i>m<sub>r,y</sub></i> for the ZINB models, including the
    time-varying case.
 
 Retain the `model_scenario` column with each row so the assignment can be
 audited and so ZINB (especially `ZINB_route_mu`) species can be checked for
 outlying behaviour.
+
+---
+
+## 5. Criteria for assigning species to scenarios
+
+Scenario assignment is rule-based and reproducible, implemented in
+`code/3_assign_model_scenarios.R`. Each species is fit once with the baseline
+negative-binomial model (`code/1_baseline_NB_fit.R`), summarized by
+`code/2_baseline_diagnostics.R`, and then classified from its convergence and
+posterior-predictive-check (PPC) diagnostics. The result is written to
+`output/model_scenario_assignments/<land_cover>_model_scenario_assignments.csv`
+with a `model_scenario`, an `assignment_reason`, and `diagnostic_flags` for
+auditing.
+
+### 5.1 Diagnostic inputs
+
+The classifier uses the following quantities per species:
+
+- <i>p</i><sub>prop_zero</sub> (`p_prop_zero`) — PPC Bayesian <i>p</i>-value for the
+  proportion of zeros: the fraction of posterior-predictive replicates whose
+  zero proportion is at least the observed zero proportion. Small values mean
+  the baseline NB **under-predicts zeros** (excess/structural zeros).
+- <i>p</i><sub>sd</sub> (`p_sd`), <i>p</i><sub>max</sub> (`p_max`) — PPC
+  <i>p</i>-values for the replicated standard deviation and maximum count. Values
+  near 1 mean the model under-predicts spread/extremes (over-dispersion or heavy
+  tails); values near 0 mean it over-predicts them (under-dispersion or an
+  extreme-route artifact).
+- <i>obs</i><sub>mean</sub> (`obs_mean`) — observed mean count, used to flag
+  **abundant** species.
+- max <i>R&#770;</i> (`baseline_max_rhat`) and min bulk-ESS
+  (`baseline_min_ess_bulk`) — baseline sampling quality, used to flag **severe
+  mixing** problems.
+
+### 5.2 Thresholds
+
+| Symbol | Variable | Default | Meaning |
+|---|---|---|---|
+| — | `ppc_tail` | 0.05 | Tail cutoff for PPC <i>p</i>-values |
+| — | `strong_zero_tail` | 0.01 | Stricter cutoff for strong excess zeros |
+| — | `abundant_mean_thresh` | 5 | Observed mean at/above which a species is "abundant" |
+| — | `poor_rhat_thresh` | 1.10 | <i>R&#770;</i> above which mixing is "severe" |
+| — | `low_ess_thresh` | 100 | Bulk-ESS below which mixing is "severe" |
+
+Derived boolean flags:
+
+- **excess_zero** = <i>p</i><sub>prop_zero</sub> &lt; `ppc_tail`
+- **strong_excess_zero** = <i>p</i><sub>prop_zero</sub> &lt; `strong_zero_tail`
+- **abundant** = <i>obs</i><sub>mean</sub> &ge; `abundant_mean_thresh`
+- **high_spread** = <i>p</i><sub>sd</sub> &gt; 1 &minus; `ppc_tail` &nbsp;or&nbsp; <i>p</i><sub>max</sub> &gt; 1 &minus; `ppc_tail`
+- **low_spread** = <i>p</i><sub>sd</sub> &lt; `ppc_tail` &nbsp;or&nbsp; <i>p</i><sub>max</sub> &lt; `ppc_tail`
+- **severe_mixing** = max <i>R&#770;</i> &gt; `poor_rhat_thresh` &nbsp;or&nbsp; min bulk-ESS &lt; `low_ess_thresh`
+
+### 5.3 Decision rules
+
+Rules are evaluated **in order**; the first match wins:
+
+1. **strong_excess_zero AND high_spread** &rarr; `ZINB_route_mu_test`
+   (strong excess zeros with inflated spread/max: route- and abundance-varying
+   zero inflation).
+2. **excess_zero AND high_spread AND abundant** &rarr; `ZINB_route_mu_test`.
+3. **strong_excess_zero AND abundant** &rarr; `ZINB_route_test`
+   (strong excess zeros in an abundant species without strong spread/max
+   inflation: route-level zero inflation).
+4. **low_spread** &rarr; `NB_test`
+   (under-dispersion or an extreme-route artifact rather than excess zeros; keep
+   NB and inspect separately).
+5. **severe_mixing** &rarr; `NB_test`
+   (poor baseline mixing but no excess-zero signal; refit with the improved NB
+   settings first).
+6. **otherwise** &rarr; `NB_test` (default; no zero inflation required).
+
+Weak or moderate zero flags in low-count species therefore stay on `NB_test`
+unless the spread/max checks also fail. When baseline diagnostics are missing
+(fresh run or subset test), every species degrades gracefully to `NB_test`.
 
 ---
 
