@@ -6,7 +6,9 @@
 #   3. tighter scale priors in the lightweight NB test model
 #   4. stable non-zero initial values
 #   5. higher adapt_delta
-#   6. a simple ZINB variant for species with excess-zero PPC failures
+#   6. a simple global-ZINB variant for species with excess-zero PPC failures
+#   7. a route-varying ZINB variant for persistent route-specific zeros
+#   8. a route- and abundance-varying ZINB variant for residual zero failures
 #
 # Outputs are written under output/refit_tests/.
 
@@ -42,7 +44,8 @@ test_species_codes <- c("BOSP", "CCLO", "UPSA", "BOBO")
 min_max_route_years <- 3
 fit_spatial_flag <- ifelse(spatial_intercept, 1L, 0L)
 
-fit_models <- c("NB_test", "ZINB_test")
+fit_models <- c("NB_test", "ZINB_test", "ZINB_route_test", "ZINB_route_mu_test")
+refit_existing_models <- FALSE
 
 iter_warmup <- 1500
 iter_sampling <- 1500
@@ -52,14 +55,25 @@ adapt_delta <- 0.99
 max_treedepth <- 15
 n_ppc_draws <- 250
 
+# Longer runs for the difficult species/model combinations suggested by the
+# latest tests. These settings are used only for rows that match below; all
+# other fits use the defaults above.
+long_run_species <- c("UPSA", "BOBO")
+long_run_models <- c("ZINB_route_mu_test")
+long_iter_warmup <- 3000
+long_iter_sampling <- 3000
+long_chains <- 4
+
 # Set TRUE when you want to force fresh data prep. Fresh prep is needed to test
 # min_max_route_years. If FALSE, the script will reuse a matching test cache.
 rebuild_stan_data <- TRUE
 
 out_dir <- here::here("output", "refit_tests")
 data_cache_dir <- here::here("data", "stan_data", "refit_tests")
+cmdstan_csv_dir <- file.path(out_dir, "cmdstan_csv")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(data_cache_dir, recursive = TRUE, showWarnings = FALSE)
+dir.create(cmdstan_csv_dir, recursive = TRUE, showWarnings = FALSE)
 
 cov_csv <- here::here("data", paste0(land_cover, ".csv"))
 mean_col <- paste0("mean_", land_cover)
@@ -67,6 +81,8 @@ slope_col <- paste0("slope_", land_cover)
 
 nb_model_file <- here::here("models", "slope_habitat_route_NB_test.stan")
 zinb_model_file <- here::here("models", "slope_habitat_route_ZINB_test.stan")
+zinb_route_model_file <- here::here("models", "slope_habitat_route_ZINB_route_test.stan")
+zinb_route_mu_model_file <- here::here("models", "slope_habitat_route_ZINB_route_mu_test.stan")
 
 species_to_f <- function(sp) {
   gsub("'", "", gsub(" ", "_", sp, fixed = TRUE), fixed = TRUE)
@@ -106,9 +122,43 @@ make_init <- function(stan_data, model_name) {
       sdalpha = 0.5,
       sdrho_alpha_hab = 0.2
     )
-    if (identical(model_name, "ZINB_test")) init$zi_logit <- -2
+    if (identical(model_name, "ZINB_test")) {
+      init$zi_logit <- -2
+    }
+    if (identical(model_name, "ZINB_route_test")) {
+      init$zi_intercept <- -2
+      init$zi_route_raw <- rnorm(stan_data$nroutes, 0, 0.02)
+      init$sd_zi_route <- 0.25
+    }
+    if (identical(model_name, "ZINB_route_mu_test")) {
+      init$zi_intercept <- -2
+      init$zi_log_mu <- -0.5
+      init$zi_route_raw <- rnorm(stan_data$nroutes, 0, 0.02)
+      init$sd_zi_route <- 0.25
+    }
     init
   }
+}
+
+fit_options_for <- function(species_code, model_name) {
+  if (species_code %in% long_run_species && model_name %in% long_run_models) {
+    return(list(
+      chains = long_chains,
+      parallel_chains = long_chains,
+      iter_warmup = long_iter_warmup,
+      iter_sampling = long_iter_sampling,
+      adapt_delta = adapt_delta,
+      max_treedepth = max_treedepth
+    ))
+  }
+  list(
+    chains = chains,
+    parallel_chains = parallel_chains,
+    iter_warmup = iter_warmup,
+    iter_sampling = iter_sampling,
+    adapt_delta = adapt_delta,
+    max_treedepth = max_treedepth
+  )
 }
 
 prepare_species_data <- function(species, species_bbs, species_f) {
@@ -308,8 +358,12 @@ sampler_row <- function(fit, species, species_code, model_name) {
 ppc_row <- function(fit, stan_data, species, species_code, model_name) {
   draws_E <- posterior::as_draws_matrix(fit$draws("E"))
   draws_phi <- posterior::as_draws_matrix(fit$draws("phi"))
-  has_zi <- "zi" %in% variables(fit$draws())
-  draws_zi <- if (has_zi) posterior::as_draws_matrix(fit$draws("zi")) else NULL
+  draws_zi <- tryCatch(posterior::as_draws_matrix(fit$draws("zi")),
+                       error = function(e) NULL)
+  draws_zi_route <- tryCatch(posterior::as_draws_matrix(fit$draws("zi_route")),
+                             error = function(e) NULL)
+  draws_zi_obs <- tryCatch(posterior::as_draws_matrix(fit$draws("zi_obs")),
+                           error = function(e) NULL)
 
   idx <- sample.int(nrow(draws_E), min(n_ppc_draws, nrow(draws_E)))
   y <- stan_data$count
@@ -330,7 +384,14 @@ ppc_row <- function(fit, stan_data, species, species_code, model_name) {
     phi <- as.numeric(draws_phi[d, 1])
     y_rep <- rnbinom(length(y), size = phi, mu = mu)
 
-    if (has_zi) {
+    if (!is.null(draws_zi_obs)) {
+      structural_zero <- rbinom(length(y), size = 1, prob = draws_zi_obs[d, ]) == 1
+      y_rep[structural_zero] <- 0L
+    } else if (!is.null(draws_zi_route)) {
+      zi_by_obs <- draws_zi_route[d, stan_data$route]
+      structural_zero <- rbinom(length(y), size = 1, prob = zi_by_obs) == 1
+      y_rep[structural_zero] <- 0L
+    } else if (!is.null(draws_zi)) {
       zi <- as.numeric(draws_zi[d, 1])
       structural_zero <- rbinom(length(y), size = 1, prob = zi) == 1
       y_rep[structural_zero] <- 0L
@@ -373,6 +434,21 @@ loo_row <- function(fit, species, species_code, model_name) {
   )
 }
 
+fit_output_files_exist <- function(fit) {
+  files <- tryCatch(
+    fit$output_files(include_failed = FALSE),
+    error = function(e) character()
+  )
+  length(files) > 0 && all(file.exists(files))
+}
+
+save_fit_with_csv <- function(fit, fit_file, summary_file, csv_dir) {
+  dir.create(csv_dir, recursive = TRUE, showWarnings = FALSE)
+  fit$save_output_files(dir = csv_dir)
+  saveRDS(fit, fit_file)
+  saveRDS(fit$summary(), summary_file)
+}
+
 # Main ---------------------------------------------------------------------
 spp_df <- read.csv(here::here("data", "spp_names_codes_group_aou.csv"))
 target_spp <- spp_df %>%
@@ -388,9 +464,13 @@ if (nrow(target_spp) == 0) {
 cat("Test species:\n")
 print(target_spp %>% select(Common.Name, Code, bbs_english))
 
-mod_nb <- cmdstan_model(nb_model_file)
-mod_zinb <- cmdstan_model(zinb_model_file)
-models <- list(NB_test = mod_nb, ZINB_test = mod_zinb)
+model_files <- list(
+  NB_test = nb_model_file,
+  ZINB_test = zinb_model_file,
+  ZINB_route_test = zinb_route_model_file,
+  ZINB_route_mu_test = zinb_route_mu_model_file
+)
+compiled_models <- list()
 
 conv_rows <- list()
 sampler_rows <- list()
@@ -412,26 +492,48 @@ for (i in seq_len(nrow(target_spp))) {
   cat("============================================================\n")
 
   for (model_name in fit_models) {
-    cat("\nFitting", model_name, "for", sp, "\n")
-    fit <- models[[model_name]]$sample(
-      data = stan_data,
-      seed = 1000 + i,
-      chains = chains,
-      parallel_chains = parallel_chains,
-      iter_warmup = iter_warmup,
-      iter_sampling = iter_sampling,
-      adapt_delta = adapt_delta,
-      max_treedepth = max_treedepth,
-      init = make_init(stan_data, model_name),
-      refresh = 250,
-      show_exceptions = TRUE,
-      save_cmdstan_config = TRUE
-    )
-
     base <- paste0(sp_f, "_", land_cover, "_", model_name,
                    "_minmax", min_max_route_years)
-    saveRDS(fit, file.path(out_dir, paste0(base, "_stanfit.rds")))
-    saveRDS(fit$summary(), file.path(out_dir, paste0(base, "_summary.rds")))
+    fit_file <- file.path(out_dir, paste0(base, "_stanfit.rds"))
+    summary_file <- file.path(out_dir, paste0(base, "_summary.rds"))
+    model_csv_dir <- file.path(cmdstan_csv_dir, base)
+
+    if (file.exists(fit_file) && !refit_existing_models) {
+      cat("\nLoading existing", model_name, "fit for", sp, "\n")
+      fit <- readRDS(fit_file)
+      if (!fit_output_files_exist(fit)) {
+        cat("  Existing fit object points to missing CmdStan CSV files; skipping ",
+            model_name, " for ", sp, ".\n", sep = "")
+        cat("  To refit it, set refit_existing_models <- TRUE, or delete: ",
+            fit_file, "\n", sep = "")
+        next
+      }
+      if (!file.exists(summary_file)) {
+        saveRDS(fit$summary(), summary_file)
+      }
+    } else {
+      cat("\nFitting", model_name, "for", sp, "\n")
+      if (is.null(compiled_models[[model_name]])) {
+        compiled_models[[model_name]] <- cmdstan_model(model_files[[model_name]])
+      }
+      fit_opts <- fit_options_for(sp_code, model_name)
+      fit <- compiled_models[[model_name]]$sample(
+        data = stan_data,
+        seed = 1000 + i,
+        chains = fit_opts$chains,
+        parallel_chains = fit_opts$parallel_chains,
+        iter_warmup = fit_opts$iter_warmup,
+        iter_sampling = fit_opts$iter_sampling,
+        adapt_delta = fit_opts$adapt_delta,
+        max_treedepth = fit_opts$max_treedepth,
+        init = make_init(stan_data, model_name),
+        refresh = 250,
+        show_exceptions = TRUE,
+        save_cmdstan_config = TRUE
+      )
+
+      save_fit_with_csv(fit, fit_file, summary_file, model_csv_dir)
+    }
 
     conv_rows[[paste(sp_code, model_name, sep = "_")]] <-
       convergence_row(fit, sp, sp_code, model_name)
