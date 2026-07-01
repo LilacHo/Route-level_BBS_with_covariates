@@ -163,6 +163,17 @@ generated quantities {
   real T;
   real T_no_habitat;
   real T_dif;
+  // Per-route change in expected observed count, i.e. the marginal mean
+  // (1 - zi) * NB_mean. Here the structural-zero probability depends on the
+  // expected log abundance and is therefore time-varying, so it does NOT cancel
+  // in the ratio. We reconstruct zi at the first and last year for each route
+  // from the same abundance predictor used for CH (observer and first-year
+  // nuisance terms excluded), so CH_no_habitat is the trend in the marginal
+  // expected count and matches the estimand used by the NB and ZINB_route
+  // models.
+  vector[nroutes] CH_route;
+  vector[nroutes] CH_no_habitat_route;
+  vector[nroutes] CH_dif_route;
 
   {
     real first_full = 0;
@@ -175,10 +186,30 @@ generated quantities {
     }
 
     for (s in 1:nroutes) {
-      first_full += exp(alpha[s] + beta[s] * (1 - fixedyear));
-      last_full += exp(alpha[s] + beta[s] * (nyears - fixedyear));
-      first_no_habitat += exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
-      last_no_habitat += exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+      real zi_route_term = zi_intercept + sd_zi_route * zi_route_raw[s];
+
+      real lp_first_full = alpha[s] + beta[s] * (1 - fixedyear);
+      real lp_last_full = alpha[s] + beta[s] * (nyears - fixedyear);
+      real lp_first_no_habitat = alpha[s] + beta_resid[s] * (1 - fixedyear);
+      real lp_last_no_habitat = alpha[s] + beta_resid[s] * (nyears - fixedyear);
+
+      real m_first_full = (1 - inv_logit(zi_route_term + zi_log_mu * lp_first_full))
+        * exp(lp_first_full);
+      real m_last_full = (1 - inv_logit(zi_route_term + zi_log_mu * lp_last_full))
+        * exp(lp_last_full);
+      real m_first_no_habitat = (1 - inv_logit(zi_route_term + zi_log_mu * lp_first_no_habitat))
+        * exp(lp_first_no_habitat);
+      real m_last_no_habitat = (1 - inv_logit(zi_route_term + zi_log_mu * lp_last_no_habitat))
+        * exp(lp_last_no_habitat);
+
+      first_full += m_first_full;
+      last_full += m_last_full;
+      first_no_habitat += m_first_no_habitat;
+      last_no_habitat += m_last_no_habitat;
+
+      CH_route[s] = 100 * (m_last_full / m_first_full - 1);
+      CH_no_habitat_route[s] = 100 * (m_last_no_habitat / m_first_no_habitat - 1);
+      CH_dif_route[s] = CH_route[s] - CH_no_habitat_route[s];
     }
 
     first_full /= nroutes;

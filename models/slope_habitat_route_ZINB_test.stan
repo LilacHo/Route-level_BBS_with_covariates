@@ -144,6 +144,14 @@ generated quantities {
   real T;
   real T_no_habitat;
   real T_dif;
+  // Per-route change in expected observed count, i.e. the marginal mean
+  // (1 - zi) * NB_mean. The structural-zero probability is a single global,
+  // time-invariant scalar here, so the (1 - zi) factor cancels in each
+  // per-route ratio; it is kept explicit so CH_no_habitat is on the same
+  // estimand (trend in the marginal mean) as the other model scenarios.
+  vector[nroutes] CH_route;
+  vector[nroutes] CH_no_habitat_route;
+  vector[nroutes] CH_dif_route;
 
   {
     real first_full = 0;
@@ -156,10 +164,20 @@ generated quantities {
     }
 
     for (s in 1:nroutes) {
-      first_full += exp(alpha[s] + beta[s] * (1 - fixedyear));
-      last_full += exp(alpha[s] + beta[s] * (nyears - fixedyear));
-      first_no_habitat += exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
-      last_no_habitat += exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+      real keep = 1 - zi;
+      real m_first_full = keep * exp(alpha[s] + beta[s] * (1 - fixedyear));
+      real m_last_full = keep * exp(alpha[s] + beta[s] * (nyears - fixedyear));
+      real m_first_no_habitat = keep * exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
+      real m_last_no_habitat = keep * exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+
+      first_full += m_first_full;
+      last_full += m_last_full;
+      first_no_habitat += m_first_no_habitat;
+      last_no_habitat += m_last_no_habitat;
+
+      CH_route[s] = 100 * (m_last_full / m_first_full - 1);
+      CH_no_habitat_route[s] = 100 * (m_last_no_habitat / m_first_no_habitat - 1);
+      CH_dif_route[s] = CH_route[s] - CH_no_habitat_route[s];
     }
 
     first_full /= nroutes;

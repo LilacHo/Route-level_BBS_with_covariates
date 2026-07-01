@@ -130,6 +130,13 @@ generated quantities {
   real T;
   real T_no_habitat;
   real T_dif;
+  // Per-route change in expected observed count. Reported to R for the
+  // cross-species comparison so every model scenario uses the same estimand
+  // (trend in the marginal mean). For plain NB the marginal mean equals the
+  // NB mean because there are no structural zeros.
+  vector[nroutes] CH_route;
+  vector[nroutes] CH_no_habitat_route;
+  vector[nroutes] CH_dif_route;
 
   {
     real first_full = 0;
@@ -142,10 +149,19 @@ generated quantities {
     }
 
     for (s in 1:nroutes) {
-      first_full += exp(alpha[s] + beta[s] * (1 - fixedyear));
-      last_full += exp(alpha[s] + beta[s] * (nyears - fixedyear));
-      first_no_habitat += exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
-      last_no_habitat += exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+      real m_first_full = exp(alpha[s] + beta[s] * (1 - fixedyear));
+      real m_last_full = exp(alpha[s] + beta[s] * (nyears - fixedyear));
+      real m_first_no_habitat = exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
+      real m_last_no_habitat = exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+
+      first_full += m_first_full;
+      last_full += m_last_full;
+      first_no_habitat += m_first_no_habitat;
+      last_no_habitat += m_last_no_habitat;
+
+      CH_route[s] = 100 * (m_last_full / m_first_full - 1);
+      CH_no_habitat_route[s] = 100 * (m_last_no_habitat / m_first_no_habitat - 1);
+      CH_dif_route[s] = CH_route[s] - CH_no_habitat_route[s];
     }
 
     first_full /= nroutes;

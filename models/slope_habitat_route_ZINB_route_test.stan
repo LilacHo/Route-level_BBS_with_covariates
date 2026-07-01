@@ -156,6 +156,14 @@ generated quantities {
   real T;
   real T_no_habitat;
   real T_dif;
+  // Per-route change in expected observed count, i.e. the marginal mean
+  // (1 - zi_route[s]) * NB_mean. This keeps CH_no_habitat on the same estimand
+  // as the NB and ZINB_route_mu models. Here zi_route is time-invariant, so the
+  // (1 - zi) factor cancels in each per-route ratio; it is kept explicit for
+  // consistency and to document the marginal-mean definition.
+  vector[nroutes] CH_route;
+  vector[nroutes] CH_no_habitat_route;
+  vector[nroutes] CH_dif_route;
 
   {
     real first_full = 0;
@@ -168,10 +176,20 @@ generated quantities {
     }
 
     for (s in 1:nroutes) {
-      first_full += exp(alpha[s] + beta[s] * (1 - fixedyear));
-      last_full += exp(alpha[s] + beta[s] * (nyears - fixedyear));
-      first_no_habitat += exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
-      last_no_habitat += exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+      real keep = 1 - zi_route[s];
+      real m_first_full = keep * exp(alpha[s] + beta[s] * (1 - fixedyear));
+      real m_last_full = keep * exp(alpha[s] + beta[s] * (nyears - fixedyear));
+      real m_first_no_habitat = keep * exp(alpha[s] + beta_resid[s] * (1 - fixedyear));
+      real m_last_no_habitat = keep * exp(alpha[s] + beta_resid[s] * (nyears - fixedyear));
+
+      first_full += m_first_full;
+      last_full += m_last_full;
+      first_no_habitat += m_first_no_habitat;
+      last_no_habitat += m_last_no_habitat;
+
+      CH_route[s] = 100 * (m_last_full / m_first_full - 1);
+      CH_no_habitat_route[s] = 100 * (m_last_no_habitat / m_first_no_habitat - 1);
+      CH_dif_route[s] = CH_route[s] - CH_no_habitat_route[s];
     }
 
     first_full /= nroutes;
