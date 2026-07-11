@@ -9,21 +9,14 @@
 # Outputs one CSV per species with:
 #   species, route, routeF, latitude, longitude, CH, CH_no_habitat, CH_dif
 #
-# CH_no_habitat_route[s] = 100 * (exp(beta_resid[s] * dt) - 1)
-#   where dt = lastYear - firstYear, and beta_resid[s] is the posterior mean
-#   of the residual slope (trend net of the habitat-change component for the
-#   target group).
-#
-# If pre-fitted output files (summ_fit.rds + stan_data.RData) do not exist for
-# a species, the full data-prep and model-fitting pipeline is run inline to
-# produce them.
-#
-# To run for a different group, change `land_cover` in the Settings block.
-#
-# CH_no_habitat_route[s] = 100 * (exp(beta_resid[s] * dt) - 1)
-#   where dt = lastYear - firstYear, and beta_resid[s] is the posterior mean
-#   of the residual slope (trend net of the habitat-change component for the
-#   target group).
+# Model: models/slope_habitat_route_NB_New.stan (sum_to_zero_vector
+# parameterization + route-level generated quantities). CH / CH_no_habitat /
+# CH_dif are read directly from that model's CH_route / CH_no_habitat_route /
+# CH_dif_route generated quantities (posterior means), rather than computed
+# in R from the posterior mean of beta_resid via 100*(exp(beta_resid*dt)-1).
+# CH_no_habitat_route is the route-level habitat-excluded trend (percent
+# change over the full study period net of the habitat-driven slope
+# component for the target group).
 #
 # If pre-fitted output files (summ_fit.rds + stan_data.RData) do not exist for
 # a species, the full data-prep and model-fitting pipeline is run inline to
@@ -48,9 +41,8 @@ land_cover <- "grasslands"   # target group: must match a value in the
                               # 'Group' column of spp_names_codes_group_aou.csv
                               # and the covariate file data/<land_cover>.csv
 firstYear   <- 2010
-lastYear    <- 2024
+lastYear    <- 2025
 year_range  <- firstYear:lastYear
-dt          <- lastYear - firstYear   # 14
 
 strat <- "bbs_usgs"
 spatial_intercept <- TRUE
@@ -76,7 +68,7 @@ species_to_f <- function(sp) {
 }
 
 # Compile the Stan model once (reused across species) ---------------------
-mod.file <- "models/slope_habitat_route_NB.stan"
+mod.file <- "models/slope_habitat_route_NB_New.stan"
 slope_model <- cmdstan_model(mod.file, force_recompile = TRUE)
 
 # Helper: slope of a linear regression
@@ -84,9 +76,6 @@ sl <- function(y, x) {
   t <- lm(y ~ x)
   coefficients(t)[["x"]]
 }
-
-# CH_no_habitat calculation helper
-pct_cum <- function(b, dt) 100 * (exp(b * dt) - 1)
 
 # ==========================================================================
 # Function: run the full data-prep + fit pipeline for one species
@@ -360,16 +349,23 @@ for (i in seq_len(nrow(target_spp))) {
     route_map <- fit_result$route_map
   }
 
-  # Extract beta (full slope) and beta_resid (residual slope) per route
-  beta_df <- summ %>%
-    filter(str_detect(variable, "^beta\\[")) %>%
+  # Extract route-level CH, CH_no_habitat, CH_dif directly from the model's
+  # generated quantities (posterior means of CH_route / CH_no_habitat_route /
+  # CH_dif_route), rather than recomputing them in R from beta/beta_resid.
+  ch_df <- summ %>%
+    filter(str_detect(variable, "^CH_route\\[")) %>%
     transmute(routeF = as.integer(str_extract(variable, "\\d+")),
-              beta = mean)
+              CH = mean)
 
-  beta_resid_df <- summ %>%
-    filter(str_detect(variable, "^beta_resid\\[")) %>%
+  ch_no_habitat_df <- summ %>%
+    filter(str_detect(variable, "^CH_no_habitat_route\\[")) %>%
     transmute(routeF = as.integer(str_extract(variable, "\\d+")),
-              beta_resid = mean)
+              CH_no_habitat = mean)
+
+  ch_dif_df <- summ %>%
+    filter(str_detect(variable, "^CH_dif_route\\[")) %>%
+    transmute(routeF = as.integer(str_extract(variable, "\\d+")),
+              CH_dif = mean)
 
   # Get lat/lon from route_map (sf object)
   route_info <- route_map %>%
@@ -379,12 +375,10 @@ for (i in seq_len(nrow(target_spp))) {
     st_drop_geometry() %>%
     select(route, routeF, latitude, longitude)
 
-  # Compute route-level CH, CH_no_habitat, CH_dif
-  route_ch <- beta_df %>%
-    left_join(beta_resid_df, by = "routeF") %>%
-    mutate(CH            = pct_cum(beta, dt),
-           CH_no_habitat = pct_cum(beta_resid, dt),
-           CH_dif        = CH - CH_no_habitat) %>%
+  # Assemble route-level CH, CH_no_habitat, CH_dif
+  route_ch <- ch_df %>%
+    left_join(ch_no_habitat_df, by = "routeF") %>%
+    left_join(ch_dif_df, by = "routeF") %>%
     left_join(route_info, by = "routeF") %>%
     mutate(species      = sp,
            species_code = sp_code,
