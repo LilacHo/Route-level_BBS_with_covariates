@@ -1,22 +1,27 @@
-# 1_baseline_NB_fit.R
+# 1_baseline_ZINB_fit.R
 #
-# Baseline negative-binomial fit for ALL species in a target group. This is the
-# first step of the pipeline: it produces the baseline fits that
-# 2_baseline_diagnostics.R summarizes and 3_assign_model_scenarios.R uses to
-# choose a per-species model scenario for the scenario-aware refit in
-# 4_scenario_fit.R.
+# Baseline zero-inflated negative-binomial (ZINB) fit for ALL species in a
+# target group. Mirrors 1_baseline_NB_fit.R's structure and pipeline, but
+# fits models/slope_habitat_route_ZINB_New.stan instead of
+# models/slope_habitat_route_NB_New.stan.
 #
 # Outputs one CSV per species with:
 #   species, route, routeF, latitude, longitude, CH, CH_no_habitat, CH_dif
 #
-# Model: models/slope_habitat_route_NB_New.stan (sum_to_zero_vector
-# parameterization + route-level generated quantities). CH / CH_no_habitat /
-# CH_dif are read directly from that model's CH_route / CH_no_habitat_route /
-# CH_dif_route generated quantities (posterior means), rather than computed
-# in R from the posterior mean of beta_resid via 100*(exp(beta_resid*dt)-1).
-# CH_no_habitat_route is the route-level habitat-excluded trend (percent
-# change over the full study period net of the habitat-driven slope
-# component for the target group).
+# Model: models/slope_habitat_route_ZINB_New.stan (ZINB likelihood +
+# sum_to_zero_vector parameterization + route-level generated quantities,
+# mirroring slope_habitat_route_NB_New.stan). CH / CH_no_habitat / CH_dif are
+# read directly from that model's CH_route / CH_no_habitat_route /
+# CH_dif_route generated quantities (posterior means). CH_no_habitat_route is
+# the route-level habitat-excluded trend (percent change over the full study
+# period net of the habitat-driven slope component for the target group).
+# theta (zero-inflation probability) is a constant population-level factor
+# on expected count, so it cancels in these ratios and does not need to be
+# accounted for separately here.
+#
+# Output files are tagged "_ZINB" throughout so they do not collide with the
+# NB baseline fit's files for the same species / land_cover / years produced
+# by 1_baseline_NB_fit.R.
 #
 # If pre-fitted output files (summ_fit.rds + stan_data.RData) do not exist for
 # a species, the full data-prep and model-fitting pipeline is run inline to
@@ -33,7 +38,7 @@ library(posterior)
 library(sf)
 library(here)
 
-here::i_am("code/1_baseline_NB_fit.R")
+here::i_am("code/1_baseline_ZINB_fit.R")
 source("functions/neighbours_define_voronoi.R")
 
 # Settings ----------------------------------------------------------------
@@ -68,7 +73,7 @@ species_to_f <- function(sp) {
 }
 
 # Compile the Stan model once (reused across species) ---------------------
-mod.file <- "models/slope_habitat_route_NB_New.stan"
+mod.file <- "models/slope_habitat_route_ZINB_New.stan"
 slope_model <- cmdstan_model(mod.file, force_recompile = TRUE)
 
 # Helper: slope of a linear regression
@@ -186,7 +191,7 @@ fit_species <- function(species, species_bbs, species_f, land_cover, strat, firs
   # Save map PDF
   if (!dir.exists(here::here("data", "maps"))) dir.create(here::here("data", "maps"), recursive = TRUE)
   pdf(here::here("data", "maps",
-                 paste0("route_map_", firstYear, "-", lastYear, "_", species_f, "_", land_cover, ".pdf")))
+                 paste0("route_map_", firstYear, "-", lastYear, "_", species_f, "_", land_cover, "_ZINB.pdf")))
   print(car_stan_dat$map)
   dev.off()
 
@@ -250,7 +255,7 @@ fit_species <- function(species, species_bbs, species_f, land_cover, strat, firs
   # Save stan_data ---------------------------------------------------------
   if (!dir.exists(here::here("data", "stan_data"))) dir.create(here::here("data", "stan_data"), recursive = TRUE)
   sp_data_file <- here::here("data", "stan_data",
-                             paste0(species_f, "_", land_cover, "_",
+                             paste0(species_f, "_ZINB_", land_cover, "_",
                                     firstYear, "_", lastYear, "_stan_data.RData"))
   save(list = c("stan_data", "new_data", "route_map", "realized_strata_map",
                 "car_stan_dat", "dist_matrix_km", "cov_full", "slope_full", "land_cover"),
@@ -274,7 +279,7 @@ fit_species <- function(species, species_bbs, species_f, land_cover, strat, firs
   output_dir <- here::here("output")
   if (!dir.exists(output_dir)) dir.create(output_dir)
 
-  out_base <- paste0(species_f, "_", land_cover, "_", firstYear, "_", lastYear)
+  out_base <- paste0(species_f, "_ZINB_", land_cover, "_", firstYear, "_", lastYear)
   saveRDS(stanfit, file.path(output_dir, paste0(out_base, "_stanfit.rds")))
   saveRDS(summ,    file.path(output_dir, paste0(out_base, "_summ_fit.rds")))
 
@@ -315,9 +320,9 @@ for (i in seq_len(nrow(target_spp))) {
 
   # Skip if the per-species output CSV already exists
   # Per-species CSVs are organized by target group:
-  #   output/species_routes/<land_cover>_<species>_route_CH.csv
+  #   output/species_routes/<land_cover>_<species>_ZINB_route_CH.csv
   sp_out_dir <- here::here("output", "species_routes")
-  sp_csv <- file.path(sp_out_dir, paste0(land_cover, "_", sp_f, "_route_CH.csv"))
+  sp_csv <- file.path(sp_out_dir, paste0(land_cover, "_", sp_f, "_ZINB_route_CH.csv"))
   if (file.exists(sp_csv)) {
     cat("  Skipping (already exists):", basename(sp_csv), "\n")
     next
@@ -326,10 +331,10 @@ for (i in seq_len(nrow(target_spp))) {
   # Paths to pre-fitted output
 
   summ_file <- here::here("output",
-                          paste0(sp_f, "_", land_cover, "_",
+                          paste0(sp_f, "_ZINB_", land_cover, "_",
                                  firstYear, "_", lastYear, "_summ_fit.rds"))
   stan_data_file <- here::here("data", "stan_data",
-                               paste0(sp_f, "_", land_cover, "_",
+                               paste0(sp_f, "_ZINB_", land_cover, "_",
                                       firstYear, "_", lastYear, "_stan_data.RData"))
 
   # If both files exist, load them; otherwise run full pipeline
@@ -428,7 +433,7 @@ for (i in seq_len(nrow(target_spp))) {
   # Save per-species CSV
   if (!dir.exists(sp_out_dir)) dir.create(sp_out_dir, recursive = TRUE)
   write.csv(route_ch,
-            file.path(sp_out_dir, paste0(land_cover, "_", sp_f, "_route_CH.csv")),
+            file.path(sp_out_dir, paste0(land_cover, "_", sp_f, "_ZINB_route_CH.csv")),
             row.names = FALSE)
 
   cat("  Done:", nrow(route_ch), "routes\n")
@@ -438,7 +443,7 @@ for (i in seq_len(nrow(target_spp))) {
 if (length(diagnostics_list) > 0) {
   diagnostics_all <- bind_rows(diagnostics_list)
   diag_csv <- here::here("output",
-                         paste0("diagnostics_", land_cover, "_",
+                         paste0("diagnostics_", land_cover, "_ZINB_",
                                 firstYear, "_", lastYear, ".csv"))
   write.csv(diagnostics_all, diag_csv, row.names = FALSE)
   cat("\nDiagnostics written to:", diag_csv, "\n")
